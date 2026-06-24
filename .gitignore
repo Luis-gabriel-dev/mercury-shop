@@ -1,0 +1,15 @@
+# Build
+target/
+
+# Segredos / ambiente
+.env
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# files
+instrucoes-e-roadmap-do-projeto-mercury-shop.md

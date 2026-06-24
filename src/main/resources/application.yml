@@ -1,0 +1,66 @@
+spring:
+  application:
+    name: mercury-shop
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/mercury_shop_db}
+    username: ${DB_USER:mercury}
+    password: ${DB_PASSWORD:mercury}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # O schema é de responsabilidade exclusiva do Flyway; nunca 'update' (briefing seção 9).
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: 8080
+
+# Actuator: somente health exposto; sem detalhes para anônimos (briefing seção 7.4).
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+# OpenAPI/Swagger desligado por padrão; o perfil dev liga (briefing seção 7.4).
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+    path: /swagger-ui.html
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+# Em prod o Swagger/OpenAPI permanece desligado (herda os defaults acima, reforçado aqui).
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
