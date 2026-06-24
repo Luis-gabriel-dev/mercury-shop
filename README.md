@@ -4,9 +4,10 @@ E-commerce / Order Management API — backend RESTful seguro e escalável.
 A especificação completa (fonte de verdade) fica no documento interno de instruções e
 roadmap do projeto, mantido fora do versionamento (ver `.gitignore`).
 
-> **Status:** Fase 2 (Usuários + Segurança) concluída — sobre a Fase 1 (catálogo de produtos
-> e categorias), agora com cadastro, verificação de e-mail, login JWT, refresh com rotação,
-> RBAC e o endurecimento de segurança da seção 7. Arquitetura hexagonal, Postgres + Flyway + Redis.
+> **Status:** Fase 3 (Núcleo de pedidos) concluída — sobre as Fases 1 (catálogo) e 2 (usuários +
+> segurança), agora com **carrinho** (Redis), **checkout transacional** com baixa de estoque sob
+> **lock otimista**, **idempotência** (Idempotency-Key) e cancelamento. Arquitetura hexagonal,
+> Postgres + Flyway + Redis. 41 testes verdes, incluindo teste de concorrência.
 
 ---
 
@@ -24,6 +25,8 @@ O domínio não conhece HTTP nem JPA. Cada feature segue `domain → application
 
 ```
 product/   catálogo (Fase 1)
+cart/      carrinho por usuário no Redis (Fase 3)
+order/     checkout transacional, lock otimista, idempotência, cancelamento (Fase 3)
 user/      cadastro, autenticação, RBAC (Fase 2)
   domain/         User, Role, UserStatus, OneTimeToken, PasswordPolicy + portas
                   (UserRepository, RefreshTokenStore, LoginAttemptStore, PasswordHasher,
@@ -81,6 +84,22 @@ shared/
 ### Catálogo (`/v1`)
 Leitura (`GET /v1/products`, `/v1/categories`) **pública**; escrita (`POST/PATCH/DELETE`) exige **ADMIN**.
 
+### Carrinho (`/v1/cart`, autenticado)
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/v1/cart` | carrinho atual com preços e total |
+| POST | `/v1/cart/items` | adiciona/incrementa item `{productId, quantity}` |
+| PUT | `/v1/cart/items/{productId}` | define quantidade (`0` remove) |
+| DELETE | `/v1/cart/items/{productId}` · `/v1/cart` | remove item · limpa |
+
+### Pedidos (`/v1/orders`, autenticado)
+| Método | Rota | Descrição |
+|---|---|---|
+| POST | `/v1/orders` | checkout do carrinho — header **`Idempotency-Key` obrigatório**; baixa estoque (lock otimista) → `PENDING` |
+| GET | `/v1/orders` · `/v1/orders/{id}` | próprios pedidos (outro usuário → 404) |
+| POST | `/v1/orders/{id}/cancel` | cancela `PENDING` e restaura estoque |
+| GET | `/v1/admin/orders` | todos os pedidos (**ADMIN**) |
+
 Formato de erro padrão:
 
 ```json
@@ -118,9 +137,11 @@ docker compose up -d
 ./mvnw test          # ou .\mvnw.cmd test no Windows
 ```
 
-- **Unitários:** invariantes de domínio (`Product`, `User`, `PasswordPolicy`) — sem Spring.
-- **Integração (Testcontainers, Postgres + Redis):** catálogo com RBAC, e fluxo completo de auth
-  (register → verify → login → `/me`, rotação de refresh, rate limit `429`, 401/403). Requer Docker.
+- **Unitários:** invariantes de domínio (`Product`, `User`, `PasswordPolicy`, `Order`, `Cart`) — sem Spring.
+- **Integração (Testcontainers, Postgres + Redis):** catálogo com RBAC; fluxo de auth (register →
+  verify → login → `/me`, rotação de refresh, rate limit `429`, 401/403); carrinho → checkout →
+  idempotência → cancelamento. Requer Docker.
+- **Concorrência:** M compradores no último item; o estoque **nunca fica negativo** (lock otimista).
 
 ## Build / Docker
 
@@ -131,5 +152,5 @@ docker build -t mercury-shop:latest .   # multi-stage (runtime JRE 21, usuário 
 
 ## Roadmap
 
-Fase 1 ✅ Fundação · Fase 2 ✅ Usuários + Segurança · Fase 3 Pedidos (checkout/lock otimista/idempotência) ·
+Fase 1 ✅ Fundação · Fase 2 ✅ Usuários + Segurança · Fase 3 ✅ Pedidos (checkout/lock otimista/idempotência) ·
 Fase 4 Assíncrono (RabbitMQ) + cache · Fase 5 Produção (observabilidade, Caddy/HTTPS, compose completo, CI/CD).
