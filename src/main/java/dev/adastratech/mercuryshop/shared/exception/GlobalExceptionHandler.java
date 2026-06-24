@@ -1,6 +1,7 @@
 package dev.adastratech.mercuryshop.shared.exception;
 
 import dev.adastratech.mercuryshop.shared.web.RequestIdFilter;
+import dev.adastratech.mercuryshop.user.domain.WeakPasswordException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -32,6 +33,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> handleConflict(ConflictException ex) {
         return build(HttpStatus.CONFLICT, "CONFLICT", ex.getMessage());
+    }
+
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<ApiError> handleUnauthorized(UnauthorizedException ex) {
+        return build(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", ex.getMessage());
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<ApiError> handleForbidden(ForbiddenException ex) {
+        return build(HttpStatus.FORBIDDEN, ex.getCode(), ex.getMessage());
+    }
+
+    @ExceptionHandler(WeakPasswordException.class)
+    public ResponseEntity<ApiError> handleWeakPassword(WeakPasswordException ex) {
+        return build(HttpStatus.UNPROCESSABLE_ENTITY, "WEAK_PASSWORD", ex.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

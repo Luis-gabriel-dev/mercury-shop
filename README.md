@@ -4,62 +4,87 @@ E-commerce / Order Management API — backend RESTful seguro e escalável.
 A especificação completa (fonte de verdade) fica no documento interno de instruções e
 roadmap do projeto, mantido fora do versionamento (ver `.gitignore`).
 
-> **Status:** Fase 1 (Fundação) — catálogo de **produtos e categorias** sobre PostgreSQL + Flyway,
-> documentado via OpenAPI (apenas em `dev`), em arquitetura hexagonal, com testes e Dockerfile.
+> **Status:** Fase 2 (Usuários + Segurança) concluída — sobre a Fase 1 (catálogo de produtos
+> e categorias), agora com cadastro, verificação de e-mail, login JWT, refresh com rotação,
+> RBAC e o endurecimento de segurança da seção 7. Arquitetura hexagonal, Postgres + Flyway + Redis.
 
 ---
 
-## Stack (Fase 1)
+## Stack
 
 Java 21 · Spring Boot 3.4 · Maven · Spring Web/Validation/Data JPA · PostgreSQL · Flyway ·
-springdoc-openapi (dev) · Actuator (health) · JUnit 5 + Testcontainers.
+**Spring Security + OAuth2 Resource Server (JWT RSA)** · **Redis** (refresh tokens, lockout, rate limiting) ·
+**Bucket4j** (rate limiting) · springdoc-openapi (dev) · Actuator (health) · JUnit 5 + Testcontainers.
 
-Redis, RabbitMQ, Spring Security/JWT, rate limiting e observabilidade completa entram nas fases seguintes.
+RabbitMQ (assíncrono) e observabilidade completa entram nas fases seguintes.
 
 ## Arquitetura — Hexagonal (Ports & Adapters)
 
 O domínio não conhece HTTP nem JPA. Cada feature segue `domain → application → adapter`:
 
 ```
-product/
-  domain/         Product, Category (modelos puros) + portas (ProductRepository, CategoryRepository)
-  application/    CategoryService, ProductService (casos de uso) + commands
+product/   catálogo (Fase 1)
+user/      cadastro, autenticação, RBAC (Fase 2)
+  domain/         User, Role, UserStatus, OneTimeToken, PasswordPolicy + portas
+                  (UserRepository, RefreshTokenStore, LoginAttemptStore, PasswordHasher,
+                   TokenGenerator, AccessTokenIssuer, EmailSender, ...)
+  application/    AuthService, UserService (casos de uso) + commands
   adapter/
-    in/web/       Controllers + DTOs (records) + WebMapper
-    out/persistence/  JPA entities, repositórios Spring Data e adapters que implementam as portas
+    in/web/       AuthController, UserController, AdminUserController + DTOs (records)
+    out/persistence/  JPA (users, user_roles, one_time_tokens)
+    out/security/     BCrypt, emissor de JWT RSA, gerador de tokens
+    out/redis/        refresh tokens (rotação/revogação) e bloqueio de login
+    out/email/        stub assíncrono (loga o link; RabbitMQ na Fase 4)
 shared/
-  application/    PageQuery / PageResult (paginação independente de framework)
-  config/         OpenApiConfig (perfil dev)
+  security/       SecurityConfig (deny-by-default, RBAC, headers, CORS), JWT (RSA),
+                  RateLimitingFilter (Bucket4j+Redis), AuditLogger
   exception/      GlobalExceptionHandler + ApiError (formato de erro padrão)
   web/            RequestIdFilter (request_id por requisição)
+  application/    PageQuery / PageResult (paginação independente de framework)
 ```
 
-### Decisões desta fase
-- **Produto + Categoria** com relação (FK `products.category_id` → `categories.id`).
-- **Spring Security adiado para a Fase 2** — nesta fase os endpoints de catálogo ficam abertos (somente para dev). Toda a seção 7 de segurança entra na Fase 2.
-- **`@Version`** já presente em `Product` (e `Category`), preparando o **lock otimista** que será usado no checkout (Fase 3).
-- **Identidade = UUID** gerada no domínio; **DTOs sempre** (entidades JPA nunca são serializadas); campos internos como `version` não saem nas respostas.
-- **Schema 100% Flyway** (`V1__init.sql`); aplicação roda com `ddl-auto=validate`.
+### Decisões de segurança (Fase 2)
+- **Access token = JWT RSA (RS256)**, vida 15 min, payload só `sub`+`roles`+`exp`. Chaves de env;
+  em dev/test sem chave configurada, gera-se um par **efêmero** no boot (nunca usar em prod).
+- **Refresh token = string opaca** em cookie `HttpOnly; Secure; SameSite=Strict`, guardado como
+  hash no Redis (whitelist) com **rotação** (o antigo é invalidado) e revogação no logout/reset.
+- **Senhas com BCrypt (custo 12)**; política forte (≥ 12 chars com maiúscula, minúscula, dígito e símbolo).
+- **Tokens de verificação (24h) / reset (1h)**: aleatórios, uso único, guardados como **hash**.
+- **Bloqueio temporário** após N falhas de login (Redis) e **rate limiting** (Bucket4j+Redis) em
+  `/v1/auth/login|register|forgot-password` → `429` + `Retry-After`.
+- **Deny by default**; escrita de catálogo e `/v1/users` (admin) exigem `ADMIN`; leitura de catálogo é pública.
+- Headers de segurança (CSP, X-Frame-Options DENY, nosniff, Referrer-Policy, HSTS), **CORS** com allowlist.
+- **DTOs sempre** (entidades JPA nunca serializadas); `passwordHash`/`version` nunca saem nas respostas.
+- Auditoria estruturada de eventos de segurança com `request_id` e e-mail mascarado.
 
 ## Endpoints
 
+### Autenticação (`/v1/auth`, público + rate limited)
 | Método | Rota | Descrição |
 |---|---|---|
-| POST | `/v1/categories` | cria categoria (409 se nome duplicado) |
-| GET | `/v1/categories` | lista paginada |
-| GET | `/v1/categories/{id}` | busca por id (404 se não existe) |
-| PATCH | `/v1/categories/{id}` | atualização parcial |
-| DELETE | `/v1/categories/{id}` | remove |
-| POST | `/v1/products` | cria produto |
-| GET | `/v1/products` | lista paginada — filtros `name`, `categoryId`; `page`, `size`, `sort`, `direction` |
-| GET | `/v1/products/{id}` | busca por id |
-| PATCH | `/v1/products/{id}` | atualização parcial |
-| DELETE | `/v1/products/{id}` | remove |
+| POST | `/register` | cadastro (cria `PENDING_VERIFICATION`, dispara e-mail de verificação) |
+| GET | `/verify?token=` | ativa a conta |
+| POST | `/login` | retorna access token (JWT) + cookie `refresh_token` |
+| POST | `/refresh` | novo access token, rotaciona o refresh (lê o cookie) |
+| POST | `/logout` | revoga o refresh token |
+| POST | `/forgot-password` | envia token de reset (resposta sempre genérica) |
+| POST | `/reset-password` | redefine a senha |
+
+### Usuário (`/v1/users`)
+| Método | Rota | Acesso |
+|---|---|---|
+| GET | `/me` | autenticado |
+| PATCH | `/me` | autenticado |
+| POST | `/me/change-password` | autenticado (exige senha atual) |
+| GET | `/` · `/{id}` | **ADMIN** |
+
+### Catálogo (`/v1`)
+Leitura (`GET /v1/products`, `/v1/categories`) **pública**; escrita (`POST/PATCH/DELETE`) exige **ADMIN**.
 
 Formato de erro padrão:
 
 ```json
-{ "error": { "code": "NOT_FOUND", "message": "Produto não encontrado", "requestId": "req_ab12cd34ef56" } }
+{ "error": { "code": "UNAUTHORIZED", "message": "E-mail ou senha inválidos", "requestId": "req_ab12cd34ef56" } }
 ```
 
 ## Como rodar (dev)
@@ -70,20 +95,22 @@ Pré-requisitos: **Java 21**, **Docker**. Maven **não** é necessário — use 
 # 1. Variáveis de ambiente
 cp .env.example .env            # ajuste as credenciais
 
-# 2. Sobe o Postgres (banco mercury_shop_db)
+# 2. Sobe Postgres + Redis
 docker compose up -d
 
-# 3. Roda a aplicação no perfil dev
+# 3. Roda a aplicação no perfil dev (sem JWT_*_KEY no .env, gera par RSA efêmero)
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev      # Linux/macOS
 # Windows (PowerShell):
 # .\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev"
 ```
 
-- API: `http://localhost:8080`
-- Swagger (somente em `dev`): `http://localhost:8080/swagger-ui.html`
-- Health: `http://localhost:8080/actuator/health`
-
-> No perfil `prod`, Swagger/OpenAPI ficam **desligados** e o Actuator expõe apenas `health` sem detalhes.
+- API: `http://localhost:8080` · Swagger (dev): `/swagger-ui.html` · Health: `/actuator/health`
+- Para chaves RSA fixas em prod, gere e injete via env (`JWT_PRIVATE_KEY`/`JWT_PUBLIC_KEY`):
+  ```bash
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out jwt-private.pem
+  openssl rsa -in jwt-private.pem -pubout -out jwt-public.pem
+  ```
+- Cookie do refresh é `Secure`: em navegador, use HTTPS; via curl/MockMvc funciona em HTTP.
 
 ## Testes
 
@@ -91,18 +118,18 @@ docker compose up -d
 ./mvnw test          # ou .\mvnw.cmd test no Windows
 ```
 
-- **Unitário:** invariantes de domínio de `Product` (sem Spring).
-- **Integração (Testcontainers):** sobe Postgres real, roda Flyway e exercita `POST → GET` de produto + 404.
-  Requer Docker em execução.
+- **Unitários:** invariantes de domínio (`Product`, `User`, `PasswordPolicy`) — sem Spring.
+- **Integração (Testcontainers, Postgres + Redis):** catálogo com RBAC, e fluxo completo de auth
+  (register → verify → login → `/me`, rotação de refresh, rate limit `429`, 401/403). Requer Docker.
 
 ## Build / Docker
 
 ```bash
-./mvnw clean package                 # gera target/mercury-shop-0.1.0-SNAPSHOT.jar
-docker build -t mercury-shop:latest .   # imagem multi-stage (runtime JRE 21, usuário não-root)
+./mvnw clean package
+docker build -t mercury-shop:latest .   # multi-stage (runtime JRE 21, usuário não-root)
 ```
 
 ## Roadmap
 
-Fase 1 ✅ Fundação · Fase 2 Usuários + Segurança · Fase 3 Pedidos (checkout/lock otimista/idempotência) ·
+Fase 1 ✅ Fundação · Fase 2 ✅ Usuários + Segurança · Fase 3 Pedidos (checkout/lock otimista/idempotência) ·
 Fase 4 Assíncrono (RabbitMQ) + cache · Fase 5 Produção (observabilidade, Caddy/HTTPS, compose completo, CI/CD).
