@@ -53,6 +53,10 @@ public class AuditLogger {
         emit("LOGOUT", "userId=" + userId);
     }
 
+    public void refreshTokenReuseDetected(UUID userId) {
+        emit("REFRESH_TOKEN_REUSE_DETECTED", "userId=" + userId);
+    }
+
     private void emit(String event, String detail) {
         log.info("event={} {} requestId={}", event, detail, MDC.get(RequestIdFilter.MDC_KEY));
     }

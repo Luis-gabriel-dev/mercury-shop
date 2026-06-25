@@ -120,6 +120,26 @@ class AuthApiIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
+    void refreshTokenReuseRevokesTheWholeFamily() throws Exception {
+        String email = newEmail();
+        registerAndVerify(email);
+        Cookie tokenA = login(email, PASSWORD).getResponse().getCookie("refresh_token");
+
+        // Rotação legítima A → B.
+        Cookie tokenB = mockMvc.perform(post("/v1/auth/refresh").cookie(tokenA))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getCookie("refresh_token");
+
+        // Reapresentar A (já rotacionado) é reuso → 401 e dispara a revogação da família.
+        mockMvc.perform(post("/v1/auth/refresh").cookie(tokenA))
+                .andExpect(status().isUnauthorized());
+
+        // B era legítimo, mas foi revogado junto com a família → também 401.
+        mockMvc.perform(post("/v1/auth/refresh").cookie(tokenB))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void rateLimitsLoginAttempts() throws Exception {
         MvcResult last = null;
         for (int i = 0; i < 16; i++) {

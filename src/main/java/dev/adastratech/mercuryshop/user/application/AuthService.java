@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 
 /** Casos de uso de autenticação (cadastro, verificação, login, refresh, logout, reset). */
 @Service
@@ -120,9 +121,18 @@ public class AuthService {
             throw new UnauthorizedException("Refresh token ausente");
         }
         String hash = TokenHashing.sha256(rawRefreshToken);
-        var userId = refreshTokens.findUserId(hash)
-                .orElseThrow(() -> new UnauthorizedException("Refresh token inválido"));
-        refreshTokens.revoke(hash); // rotação: o token usado é invalidado
+        Optional<UUID> activeUser = refreshTokens.findUserId(hash);
+        if (activeUser.isEmpty()) {
+            // Não está ativo. Se já foi rotacionado, alguém reapresentou um token consumido → indício de
+            // roubo: revoga TODA a família de refresh tokens do usuário (força novo login em todo lugar).
+            refreshTokens.findRotated(hash).ifPresent(compromisedUserId -> {
+                refreshTokens.revokeAllForUser(compromisedUserId);
+                audit.refreshTokenReuseDetected(compromisedUserId);
+            });
+            throw new UnauthorizedException("Refresh token inválido");
+        }
+        UUID userId = activeUser.get();
+        refreshTokens.markRotated(hash, userId, refreshTtl); // rotação: consome o token (passa a "usado")
         User user = users.findById(userId)
                 .orElseThrow(() -> new UnauthorizedException("Refresh token inválido"));
         if (user.isBlocked()) {

@@ -18,4 +18,13 @@ public interface RefreshTokenStore {
 
     /** Revoga todas as sessões (refresh tokens) do usuário — usado no reset/troca de senha. */
     void revokeAllForUser(UUID userId);
+
+    /**
+     * Marca um refresh token como rotacionado (consumido): sai do whitelist ativo e passa a ser
+     * rastreado como "já usado" por {@code ttl}, para que uma reapresentação seja detectada como reuso.
+     */
+    void markRotated(String tokenHash, UUID userId, Duration ttl);
+
+    /** Se o token já foi rotacionado (consumido), retorna o usuário — indício de reuso (token roubado). */
+    Optional<UUID> findRotated(String tokenHash);
 }

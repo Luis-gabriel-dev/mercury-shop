@@ -19,6 +19,7 @@ class RedisRefreshTokenStore implements RefreshTokenStore {
 
     private static final String PREFIX = "refresh:";
     private static final String USER_PREFIX = "refresh:user:";
+    private static final String USED_PREFIX = "refresh:used:";
 
     private final StringRedisTemplate redis;
 
@@ -59,5 +60,17 @@ class RedisRefreshTokenStore implements RefreshTokenStore {
             }
         }
         redis.delete(userKey);
+    }
+
+    @Override
+    public void markRotated(String tokenHash, UUID userId, Duration ttl) {
+        redis.delete(PREFIX + tokenHash);                       // sai do whitelist ativo
+        redis.opsForSet().remove(USER_PREFIX + userId, tokenHash);
+        redis.opsForValue().set(USED_PREFIX + tokenHash, userId.toString(), ttl); // marca como já usado
+    }
+
+    @Override
+    public Optional<UUID> findRotated(String tokenHash) {
+        return Optional.ofNullable(redis.opsForValue().get(USED_PREFIX + tokenHash)).map(UUID::fromString);
     }
 }
