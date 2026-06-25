@@ -75,6 +75,19 @@ shared/
 - **DTOs sempre** (entidades JPA nunca serializadas); `passwordHash`/`version` nunca saem nas respostas.
 - Auditoria estruturada de eventos de segurança com `request_id` e e-mail mascarado.
 
+### Decisões da Fase 6 (evolução do núcleo)
+- **Transactional Outbox**: o evento `OrderPaid` é gravado na tabela `outbox_event` **na mesma transação**
+  do pagamento; um relay (`OutboxRelay`, `@Scheduled`) publica no RabbitMQ depois, processando um evento
+  por transação com `FOR UPDATE SKIP LOCKED` (seguro com réplicas) — garante *at-least-once* mesmo se o
+  broker estiver fora no commit. Substitui a publicação `afterCommit`.
+- **Ciclo do pedido completo**: `PENDING → PAID → SHIPPED → DELIVERED` (+ `CANCELLED`). Ship/deliver via
+  `/v1/admin/orders/{id}/ship|deliver`, restritos a **ADMIN/STAFF**; transições inválidas → `409`.
+- **Reserva de estoque por expiração** (Modelo A): o estoque é debitado no checkout (o pedido `PENDING`
+  *segura* o estoque) e um sweeper agendado cancela pedidos não pagos após `mercury.orders.payment-window`
+  (default 30 min), devolvendo o estoque. O banco continua a única fonte de verdade do estoque.
+- **ArchUnit**: testes que travam as fronteiras hexagonais (domínio sem Spring/JPA; domínio e aplicação
+  sem dependência de adapters) — quebram o build se alguém cruzar a fronteira.
+
 ## Endpoints
 
 ### Autenticação (`/v1/auth`, público + rate limited)
@@ -115,6 +128,8 @@ Leitura (`GET /v1/products`, `/v1/categories`) **pública**; escrita (`POST/PATC
 | POST | `/v1/orders/{id}/pay` | paga o pedido (`PENDING`→`PAID`) e dispara `OrderPaid` (fatura + e-mail async) |
 | POST | `/v1/orders/{id}/cancel` | cancela `PENDING` e restaura estoque |
 | GET | `/v1/admin/orders` | todos os pedidos (**ADMIN**) |
+| POST | `/v1/admin/orders/{id}/ship` | `PAID`→`SHIPPED` (**ADMIN/STAFF**) |
+| POST | `/v1/admin/orders/{id}/deliver` | `SHIPPED`→`DELIVERED` (**ADMIN/STAFF**) |
 
 Formato de erro padrão:
 
@@ -211,4 +226,8 @@ CI: **GitHub Actions** (`.github/workflows/ci.yml`) roda `mvnw verify` (Testcont
 ## Roadmap
 
 Fase 1 ✅ Fundação · Fase 2 ✅ Usuários + Segurança · Fase 3 ✅ Pedidos (checkout/lock otimista/idempotência) ·
-Fase 4 ✅ Assíncrono (RabbitMQ) + cache · **Fase 5 ✅ Produção** (observabilidade, Caddy/HTTPS, compose completo, CI).
+Fase 4 ✅ Assíncrono (RabbitMQ) + cache · Fase 5 ✅ Produção (observabilidade, Caddy/HTTPS, compose completo, CI) ·
+**Fase 6 ✅ Núcleo** (Transactional Outbox, ciclo SHIPPED/DELIVERED, reserva de estoque por expiração, ArchUnit).
+
+Evolução planejada (ver plano interno): Fase 7 — pagamento real (gateway + webhook) · Fase 8 — segurança
+avançada (MFA/TOTP, detecção de reuso de refresh, LGPD) · Fase 9 — ops & CD (OpenTelemetry, Alertmanager, deploy).

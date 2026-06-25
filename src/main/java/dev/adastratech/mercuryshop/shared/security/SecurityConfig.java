@@ -58,6 +58,9 @@ public class SecurityConfig {
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         // Próprio usuário autenticado (antes das regras de ADMIN sobre /v1/users/*)
                         .requestMatchers("/v1/users/me", "/v1/users/me/**").authenticated()
+                        // Fulfillment (ship/deliver): ADMIN ou STAFF — antes da regra geral de /v1/admin/**
+                        .requestMatchers(HttpMethod.POST, "/v1/admin/orders/*/ship", "/v1/admin/orders/*/deliver")
+                        .hasAnyRole("ADMIN", "STAFF")
                         // Somente ADMIN
                         .requestMatchers(HttpMethod.GET, "/v1/users", "/v1/users/*").hasRole("ADMIN")
                         .requestMatchers("/v1/admin/**").hasRole("ADMIN")

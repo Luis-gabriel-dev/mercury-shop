@@ -16,9 +16,13 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Instant;
 import java.util.UUID;
 
-/** Consulta e cancelamento de pedidos (com restauração de estoque sob lock otimista). */
+/**
+ * Consulta, cancelamento e fulfillment de pedidos. O cancelamento (manual ou por expiração da
+ * reserva) restaura o estoque sob lock otimista, com retry.
+ */
 @Service
 public class OrderService {
 
@@ -28,6 +32,7 @@ public class OrderService {
     private final ProductRepository products;
     private final TransactionTemplate transactionTemplate;
     private final Counter ordersCancelled;
+    private final Counter ordersExpired;
 
     public OrderService(OrderRepository orders, ProductRepository products,
                         PlatformTransactionManager transactionManager, MeterRegistry meterRegistry) {
@@ -36,6 +41,8 @@ public class OrderService {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.ordersCancelled = Counter.builder("mercury.orders.cancelled")
                 .description("Pedidos cancelados").register(meterRegistry);
+        this.ordersExpired = Counter.builder("mercury.orders.expired")
+                .description("Pedidos PENDING cancelados por expiração da reserva").register(meterRegistry);
     }
 
     @Transactional(readOnly = true)
@@ -57,6 +64,29 @@ public class OrderService {
     @Transactional(readOnly = true)
     public PageResult<Order> listAll(PageQuery page) {
         return orders.findAll(page);
+    }
+
+    /** Fulfillment: marca o pedido como enviado (PAID → SHIPPED). Restrito a ADMIN/STAFF na borda. */
+    @Transactional
+    public Order ship(UUID orderId) {
+        return transition(orderId, Order::markShipped);
+    }
+
+    /** Fulfillment: marca o pedido como entregue (SHIPPED → DELIVERED). Restrito a ADMIN/STAFF na borda. */
+    @Transactional
+    public Order deliver(UUID orderId) {
+        return transition(orderId, Order::markDelivered);
+    }
+
+    private Order transition(UUID orderId, java.util.function.Consumer<Order> change) {
+        Order order = orders.findById(orderId)
+                .orElseThrow(() -> new NotFoundException("Pedido não encontrado"));
+        try {
+            change.accept(order);
+        } catch (IllegalStateException invalid) {
+            throw new ConflictException(invalid.getMessage());
+        }
+        return orders.save(order);
     }
 
     public Order cancel(UUID orderId, UUID requesterId, boolean admin) {
@@ -85,7 +115,59 @@ public class OrderService {
         if (!order.isPending()) {
             throw new ConflictException("Apenas pedidos pendentes podem ser cancelados");
         }
-        // Restaura o estoque reservado no checkout.
+        return restoreStockAndCancel(order);
+    }
+
+    /**
+     * Reserva de estoque por expiração (Modelo A): cancela todos os pedidos PENDING criados antes do
+     * {@code cutoff}, devolvendo o estoque. Retorna quantos foram efetivamente expirados.
+     */
+    public int expireUnpaidOrders(Instant cutoff, int batchSize) {
+        int expired = 0;
+        for (UUID id : orders.findPendingIdsCreatedBefore(cutoff, batchSize)) {
+            if (expireIfPending(id)) {
+                expired++;
+            }
+        }
+        return expired;
+    }
+
+    /**
+     * Cancela o pedido (restaurando estoque) somente se ainda estiver PENDING. Idempotente: se já foi
+     * pago/cancelado nesse meio-tempo, não faz nada e retorna {@code false}.
+     */
+    public boolean expireIfPending(UUID orderId) {
+        int attempt = 0;
+        while (true) {
+            attempt++;
+            try {
+                boolean expired = Boolean.TRUE.equals(
+                        transactionTemplate.execute(status -> expireInTransaction(orderId)));
+                if (expired) {
+                    ordersExpired.increment();
+                }
+                return expired;
+            } catch (ObjectOptimisticLockingFailureException conflict) {
+                if (attempt >= MAX_ATTEMPTS) {
+                    // Desiste por ora; o pedido segue PENDING e será reavaliado no próximo sweep.
+                    return false;
+                }
+                backoff(attempt);
+            }
+        }
+    }
+
+    private Boolean expireInTransaction(UUID orderId) {
+        Order order = orders.findById(orderId).orElse(null);
+        if (order == null || !order.isPending()) {
+            return false;
+        }
+        restoreStockAndCancel(order);
+        return true;
+    }
+
+    /** Devolve ao estoque os itens do pedido e o marca como CANCELLED. */
+    private Order restoreStockAndCancel(Order order) {
         for (OrderItem item : order.getItems()) {
             products.findById(item.productId()).ifPresent(product -> {
                 product.changeStockQuantity(product.getStockQuantity() + item.quantity());

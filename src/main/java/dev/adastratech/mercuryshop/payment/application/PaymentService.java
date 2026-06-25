@@ -12,15 +12,14 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Pagamento de pedido (gateway stub: sempre aprova). Marca o pedido como PAID e publica o
- * evento OrderPaid — somente APÓS o commit, para não emitir em caso de rollback.
+ * Pagamento de pedido (gateway stub: sempre aprova). Marca o pedido como PAID e grava o evento
+ * OrderPaid no <b>outbox</b>, na MESMA transação — o relay publica no broker depois (at-least-once).
+ * Se a transação reverter, o evento não é gravado e portanto nunca é publicado.
  */
 @Service
 public class PaymentService {
@@ -56,22 +55,10 @@ public class PaymentService {
         order.markPaid();
         orders.save(order);
 
+        // Grava o evento no outbox dentro desta transação; o relay publica no broker depois.
         OrderPaidEvent event = new OrderPaidEvent(order.getId(), order.getUserId(), order.getTotal(), Instant.now());
-        publishAfterCommit(() -> events.publishOrderPaid(event));
+        events.publishOrderPaid(event);
         paymentsApproved.increment();
         return payment;
-    }
-
-    private void publishAfterCommit(Runnable action) {
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    action.run();
-                }
-            });
-        } else {
-            action.run();
-        }
     }
 }

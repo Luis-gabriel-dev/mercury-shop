@@ -3,6 +3,7 @@ package dev.adastratech.mercuryshop.order.adapter.out.persistence;
 import dev.adastratech.mercuryshop.order.domain.Order;
 import dev.adastratech.mercuryshop.order.domain.OrderItem;
 import dev.adastratech.mercuryshop.order.domain.OrderRepository;
+import dev.adastratech.mercuryshop.order.domain.OrderStatus;
 import dev.adastratech.mercuryshop.shared.application.PageQuery;
 import dev.adastratech.mercuryshop.shared.application.PageResult;
 import org.springframework.data.domain.Page;
@@ -10,6 +11,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -56,6 +58,12 @@ class OrderPersistenceAdapter implements OrderRepository {
     @Override
     public PageResult<Order> findAll(PageQuery page) {
         return toPageResult(repository.findAll(pageRequest(page)));
+    }
+
+    @Override
+    public List<UUID> findPendingIdsCreatedBefore(Instant cutoff, int limit) {
+        return repository.findIdsByStatusAndCreatedAtBefore(
+                OrderStatus.PENDING, cutoff, PageRequest.of(0, limit));
     }
 
     private PageResult<Order> toPageResult(Page<OrderJpaEntity> result) {

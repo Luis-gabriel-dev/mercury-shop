@@ -68,6 +68,22 @@ public class Order {
         this.status = OrderStatus.PAID;
     }
 
+    /** Marca como enviado (PAID → SHIPPED). */
+    public void markShipped() {
+        if (status != OrderStatus.PAID) {
+            throw new IllegalStateException("Apenas pedidos pagos podem ser enviados");
+        }
+        this.status = OrderStatus.SHIPPED;
+    }
+
+    /** Marca como entregue (SHIPPED → DELIVERED). */
+    public void markDelivered() {
+        if (status != OrderStatus.SHIPPED) {
+            throw new IllegalStateException("Apenas pedidos enviados podem ser entregues");
+        }
+        this.status = OrderStatus.DELIVERED;
+    }
+
     public boolean belongsTo(UUID candidateUserId) {
         return userId.equals(candidateUserId);
     }

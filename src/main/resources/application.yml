@@ -89,6 +89,14 @@ mercury:
     consumers:
       # API de produção roda com 'false' (só publica); o serviço worker, com 'true'.
       enabled: ${MERCURY_MESSAGING_CONSUMERS_ENABLED:true}
+  outbox:
+    # Intervalo do relay que publica os eventos pendentes do outbox no RabbitMQ.
+    poll-delay: 1000
+  orders:
+    # Reserva de estoque: pedido PENDING não pago dentro desta janela é cancelado (estoque devolvido).
+    payment-window: 30m
+    # Intervalo do sweeper que expira pedidos PENDING vencidos.
+    sweep-delay: 60000
 
 ---
 spring:
@@ -102,6 +110,12 @@ springdoc:
   swagger-ui:
     enabled: true
     path: /swagger-ui.html
+
+# DEV: cria/promove um ADMIN já ativo para teste manual (login direto, sem verificar e-mail).
+mercury:
+  dev:
+    admin-email: admin@mercury.dev
+    admin-password: Adm1n!Passw0rd
 
 ---
 spring:

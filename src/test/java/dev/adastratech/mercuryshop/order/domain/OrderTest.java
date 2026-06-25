@@ -39,4 +39,29 @@ class OrderTest {
         assertThatThrownBy(() -> Order.place(UUID.randomUUID(), List.of(), "key-3"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void shipOnlyFromPaid() {
+        Order order = Order.place(UUID.randomUUID(), List.of(item("10.00", 1)), "key-ship");
+
+        // PENDING ainda não pode ser enviado.
+        assertThatThrownBy(order::markShipped).isInstanceOf(IllegalStateException.class);
+
+        order.markPaid();
+        order.markShipped();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.SHIPPED);
+    }
+
+    @Test
+    void deliverOnlyFromShipped() {
+        Order order = Order.place(UUID.randomUUID(), List.of(item("10.00", 1)), "key-deliver");
+        order.markPaid();
+
+        // PAID (ainda não enviado) não pode ser entregue.
+        assertThatThrownBy(order::markDelivered).isInstanceOf(IllegalStateException.class);
+
+        order.markShipped();
+        order.markDelivered();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.DELIVERED);
+    }
 }
