@@ -16,7 +16,7 @@ roadmap do projeto, mantido fora do versionamento (ver `.gitignore`).
 
 Java 21 · Spring Boot 3.4 · Maven · Spring Web/Validation/Data JPA · PostgreSQL · Flyway ·
 **Spring Security + OAuth2 Resource Server (JWT RSA)** · **Redis** (refresh tokens, lockout, rate limiting, cache) ·
-**Bucket4j** (rate limiting) · **RabbitMQ / Spring AMQP** (eventos assíncronos, DLQ) ·
+**Bucket4j** (rate limiting) · **RabbitMQ / Spring AMQP** (eventos assíncronos, DLQ) · **Stripe** (pagamento, com gateway stub em dev/test) ·
 **Micrometer + Prometheus + Grafana** · **Caddy** (HTTPS) · springdoc-openapi (dev) · Actuator ·
 JUnit 5 + Testcontainers · GitHub Actions (CI).
 
@@ -75,6 +75,16 @@ shared/
 - **DTOs sempre** (entidades JPA nunca serializadas); `passwordHash`/`version` nunca saem nas respostas.
 - Auditoria estruturada de eventos de segurança com `request_id` e e-mail mascarado.
 
+### Decisões da Fase 7 (pagamento real)
+- **Pagamento assíncrono via gateway**: `/pay` cria um **PaymentIntent** (Stripe) e devolve o `clientSecret`;
+  o pedido só vira `PAID` quando o **webhook** de sucesso chega. Espelha o fluxo real de gateways.
+- **Porta `PaymentGateway`** com dois adapters: **`StripePaymentGateway`** (`mercury.payment.provider=stripe`,
+  SDK oficial, assinatura do webhook verificada via `Webhook.constructEvent`, `orderId` em metadata) e
+  **`StubPaymentGateway`** (default — roda em dev/test **sem credenciais**, igual ao JWT efêmero e ao e-mail stub).
+- **Webhook idempotente e seguro**: endpoint público protegido pela verificação de assinatura; reprocessar o
+  mesmo evento é no-op (o pedido só transita a partir de `PENDING`). A confirmação grava `OrderPaid` no **outbox** (Fase 6).
+- **Segredos** (`secret-key`, `webhook-secret`) apenas via variáveis de ambiente.
+
 ### Decisões da Fase 6 (evolução do núcleo)
 - **Transactional Outbox**: o evento `OrderPaid` é gravado na tabela `outbox_event` **na mesma transação**
   do pagamento; um relay (`OutboxRelay`, `@Scheduled`) publica no RabbitMQ depois, processando um evento
@@ -125,7 +135,8 @@ Leitura (`GET /v1/products`, `/v1/categories`) **pública**; escrita (`POST/PATC
 |---|---|---|
 | POST | `/v1/orders` | checkout do carrinho — header **`Idempotency-Key` obrigatório**; baixa estoque (lock otimista) → `PENDING` |
 | GET | `/v1/orders` · `/v1/orders/{id}` | próprios pedidos (outro usuário → 404) |
-| POST | `/v1/orders/{id}/pay` | paga o pedido (`PENDING`→`PAID`) e dispara `OrderPaid` (fatura + e-mail async) |
+| POST | `/v1/orders/{id}/pay` | **inicia** o pagamento (cria a cobrança no gateway; devolve `clientSecret`). Pedido segue `PENDING` |
+| POST | `/v1/payments/webhook` | webhook do gateway (público, **assinatura verificada**): confirma `PENDING`→`PAID` e dispara `OrderPaid` |
 | POST | `/v1/orders/{id}/cancel` | cancela `PENDING` e restaura estoque |
 | GET | `/v1/admin/orders` | todos os pedidos (**ADMIN**) |
 | POST | `/v1/admin/orders/{id}/ship` | `PAID`→`SHIPPED` (**ADMIN/STAFF**) |
@@ -227,7 +238,8 @@ CI: **GitHub Actions** (`.github/workflows/ci.yml`) roda `mvnw verify` (Testcont
 
 Fase 1 ✅ Fundação · Fase 2 ✅ Usuários + Segurança · Fase 3 ✅ Pedidos (checkout/lock otimista/idempotência) ·
 Fase 4 ✅ Assíncrono (RabbitMQ) + cache · Fase 5 ✅ Produção (observabilidade, Caddy/HTTPS, compose completo, CI) ·
-**Fase 6 ✅ Núcleo** (Transactional Outbox, ciclo SHIPPED/DELIVERED, reserva de estoque por expiração, ArchUnit).
+Fase 6 ✅ Núcleo (Transactional Outbox, ciclo SHIPPED/DELIVERED, reserva de estoque por expiração, ArchUnit) ·
+**Fase 7 ✅ Pagamento real** (Stripe — PaymentIntent + webhook idempotente assinado).
 
-Evolução planejada (ver plano interno): Fase 7 — pagamento real (gateway + webhook) · Fase 8 — segurança
-avançada (MFA/TOTP, detecção de reuso de refresh, LGPD) · Fase 9 — ops & CD (OpenTelemetry, Alertmanager, deploy).
+Evolução planejada (ver plano interno): Fase 8 — segurança avançada (MFA/TOTP, detecção de reuso de refresh,
+LGPD) · Fase 9 — ops & CD (OpenTelemetry, Alertmanager, deploy).

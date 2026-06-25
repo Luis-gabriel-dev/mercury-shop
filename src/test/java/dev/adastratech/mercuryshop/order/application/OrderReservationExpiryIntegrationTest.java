@@ -72,7 +72,10 @@ class OrderReservationExpiryIntegrationTest extends IntegrationTestSupport {
         UUID productId = newProduct(5);
         UUID user = UUID.randomUUID();
         UUID orderId = placePendingOrder(productId, user);
-        paymentService.pay(orderId, user);
+        // Pagamento agora é assíncrono: inicia e confirma via webhook (stub).
+        paymentService.initiate(orderId, user);
+        paymentService.handleWebhook(
+                "{\"type\": \"payment_succeeded\", \"orderId\": \"%s\"}".formatted(orderId), null);
 
         assertThat(orderService.expireIfPending(orderId)).isFalse();
         assertThat(orderService.get(orderId, user, false).getStatus()).isEqualTo(OrderStatus.PAID);

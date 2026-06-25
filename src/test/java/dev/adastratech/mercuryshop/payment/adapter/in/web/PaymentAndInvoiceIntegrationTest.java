@@ -21,7 +21,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** Pagamento (PENDING→PAID) e o pipeline assíncrono OrderPaid → fatura gerada por worker. */
+/**
+ * Pagamento via gateway (stub): iniciar (PENDING + client secret) → webhook de sucesso marca PAID →
+ * pipeline assíncrono OrderPaid (via outbox) gera a fatura. Cobre também idempotência do webhook.
+ */
 class PaymentAndInvoiceIntegrationTest extends IntegrationTestSupport {
 
     @Autowired
@@ -63,21 +66,34 @@ class PaymentAndInvoiceIntegrationTest extends IntegrationTestSupport {
         return JsonPath.read(order.getResponse().getContentAsString(), "$.id");
     }
 
+    /** Evento de sucesso no formato do gateway stub (sem assinatura). */
+    private void sendSuccessWebhook(String orderId) throws Exception {
+        mockMvc.perform(post("/v1/payments/webhook")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\": \"payment_succeeded\", \"orderId\": \"%s\"}".formatted(orderId)))
+                .andExpect(status().isOk());
+    }
+
     @Test
-    void payMarksOrderPaidAndGeneratesInvoiceAsync() throws Exception {
+    void initiatePaymentThenWebhookMarksPaidAndGeneratesInvoice() throws Exception {
         String productId = createProduct(5, "30.00");
         UUID user = UUID.randomUUID();
         String orderId = checkout(user, productId);
 
+        // 1) Iniciar: pedido segue PENDING e recebemos o client secret para o cliente concluir.
         mockMvc.perform(post("/v1/orders/{id}/pay", orderId).with(customer(user)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("APPROVED"))
-                .andExpect(jsonPath("$.orderId").value(orderId));
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.clientSecret").isNotEmpty());
+        mockMvc.perform(get("/v1/orders/{id}", orderId).with(customer(user)))
+                .andExpect(jsonPath("$.status").value("PENDING"));
 
+        // 2) Webhook de sucesso → pedido PAID.
+        sendSuccessWebhook(orderId);
         mockMvc.perform(get("/v1/orders/{id}", orderId).with(customer(user)))
                 .andExpect(jsonPath("$.status").value("PAID"));
 
-        // O worker gera a fatura de forma assíncrona ao consumir OrderPaid.
+        // 3) Fatura gerada de forma assíncrona (OrderPaid via outbox → worker).
         UUID orderUuid = UUID.fromString(orderId);
         await().atMost(Duration.ofSeconds(15))
                 .until(() -> invoices.findByOrderId(orderUuid).isPresent());
@@ -85,13 +101,28 @@ class PaymentAndInvoiceIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    void cannotPayAnAlreadyPaidOrder() throws Exception {
+    void duplicateWebhookIsIdempotent() throws Exception {
         String productId = createProduct(5, "30.00");
         UUID user = UUID.randomUUID();
         String orderId = checkout(user, productId);
+        mockMvc.perform(post("/v1/orders/{id}/pay", orderId).with(customer(user))).andExpect(status().isOk());
 
-        mockMvc.perform(post("/v1/orders/{id}/pay", orderId).with(customer(user)))
-                .andExpect(status().isOk());
+        // Mesmo evento entregue duas vezes → ambas 200; o pedido continua PAID (sem reprocessar).
+        sendSuccessWebhook(orderId);
+        sendSuccessWebhook(orderId);
+
+        mockMvc.perform(get("/v1/orders/{id}", orderId).with(customer(user)))
+                .andExpect(jsonPath("$.status").value("PAID"));
+    }
+
+    @Test
+    void cannotInitiatePaymentOnAnAlreadyPaidOrder() throws Exception {
+        String productId = createProduct(5, "30.00");
+        UUID user = UUID.randomUUID();
+        String orderId = checkout(user, productId);
+        mockMvc.perform(post("/v1/orders/{id}/pay", orderId).with(customer(user))).andExpect(status().isOk());
+        sendSuccessWebhook(orderId);
+
         mockMvc.perform(post("/v1/orders/{id}/pay", orderId).with(customer(user)))
                 .andExpect(status().isConflict());
     }

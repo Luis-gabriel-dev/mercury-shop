@@ -97,6 +97,13 @@ mercury:
     payment-window: 30m
     # Intervalo do sweeper que expira pedidos PENDING vencidos.
     sweep-delay: 60000
+  payment:
+    # 'stub' (dev/test, sem credenciais) ou 'stripe' (gateway real). Segredos sempre via env.
+    provider: ${MERCURY_PAYMENT_PROVIDER:stub}
+    currency: ${MERCURY_PAYMENT_CURRENCY:brl}
+    stripe:
+      secret-key: ${STRIPE_SECRET_KEY:}
+      webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
 
 ---
 spring:

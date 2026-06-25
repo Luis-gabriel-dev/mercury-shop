@@ -55,7 +55,12 @@ class OrderFulfillmentIntegrationTest extends IntegrationTestSupport {
     }
 
     private void pay(UUID user, String orderId) throws Exception {
+        // Pagamento assíncrono: inicia a cobrança e confirma via webhook (stub) para o pedido virar PAID.
         mockMvc.perform(post("/v1/orders/{id}/pay", orderId).with(customer(user)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/v1/payments/webhook")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\": \"payment_succeeded\", \"orderId\": \"%s\"}".formatted(orderId)))
                 .andExpect(status().isOk());
     }
 

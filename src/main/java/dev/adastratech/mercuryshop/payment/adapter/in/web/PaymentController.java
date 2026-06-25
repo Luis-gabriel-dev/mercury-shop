@@ -1,6 +1,7 @@
 package dev.adastratech.mercuryshop.payment.adapter.in.web;
 
 import dev.adastratech.mercuryshop.payment.adapter.in.web.dto.PaymentResponse;
+import dev.adastratech.mercuryshop.payment.application.PaymentInitiation;
 import dev.adastratech.mercuryshop.payment.application.PaymentService;
 import dev.adastratech.mercuryshop.payment.domain.Payment;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -22,10 +23,12 @@ class PaymentController {
         this.paymentService = paymentService;
     }
 
+    /** Inicia o pagamento: cria a cobrança no gateway e devolve o client secret. O pedido segue PENDING. */
     @PostMapping("/{id}/pay")
     PaymentResponse pay(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        Payment payment = paymentService.pay(id, UUID.fromString(jwt.getSubject()));
+        PaymentInitiation initiation = paymentService.initiate(id, UUID.fromString(jwt.getSubject()));
+        Payment payment = initiation.payment();
         return new PaymentResponse(payment.getOrderId(), payment.getId(),
-                payment.getStatus().name(), payment.getAmount());
+                payment.getStatus().name(), payment.getAmount(), initiation.clientSecret());
     }
 }
