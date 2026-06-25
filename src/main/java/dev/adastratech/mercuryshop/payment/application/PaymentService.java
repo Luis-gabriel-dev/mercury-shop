@@ -8,6 +8,8 @@ import dev.adastratech.mercuryshop.shared.exception.ConflictException;
 import dev.adastratech.mercuryshop.shared.exception.NotFoundException;
 import dev.adastratech.mercuryshop.shared.messaging.DomainEventPublisher;
 import dev.adastratech.mercuryshop.shared.messaging.OrderPaidEvent;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -26,11 +28,15 @@ public class PaymentService {
     private final OrderRepository orders;
     private final PaymentRepository payments;
     private final DomainEventPublisher events;
+    private final Counter paymentsApproved;
 
-    public PaymentService(OrderRepository orders, PaymentRepository payments, DomainEventPublisher events) {
+    public PaymentService(OrderRepository orders, PaymentRepository payments, DomainEventPublisher events,
+                          MeterRegistry meterRegistry) {
         this.orders = orders;
         this.payments = payments;
         this.events = events;
+        this.paymentsApproved = Counter.builder("mercury.payments.approved")
+                .description("Pagamentos aprovados").register(meterRegistry);
     }
 
     @Transactional
@@ -52,6 +58,7 @@ public class PaymentService {
 
         OrderPaidEvent event = new OrderPaidEvent(order.getId(), order.getUserId(), order.getTotal(), Instant.now());
         publishAfterCommit(() -> events.publishOrderPaid(event));
+        paymentsApproved.increment();
         return payment;
     }
 

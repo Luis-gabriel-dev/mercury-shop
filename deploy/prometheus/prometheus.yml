@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  # API (2 réplicas) — DNS do compose retorna múltiplos A records.
+  - job_name: mercury-api
+    metrics_path: /actuator/prometheus
+    dns_sd_configs:
+      - names: [api]
+        type: A
+        port: 8080
+
+  - job_name: mercury-worker
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["worker:8080"]

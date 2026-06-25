@@ -4,10 +4,11 @@ E-commerce / Order Management API — backend RESTful seguro e escalável.
 A especificação completa (fonte de verdade) fica no documento interno de instruções e
 roadmap do projeto, mantido fora do versionamento (ver `.gitignore`).
 
-> **Status:** Fase 4 (Assíncrono + cache) concluída — sobre as Fases 1–3, agora com **pagamento**
-> (PENDING→PAID), evento **`OrderPaid`** via **RabbitMQ** → workers de **fatura** e **e-mail de
-> confirmação** com **DLQ**, e-mails saindo por **fila**, e **cache do catálogo** no Redis.
-> Arquitetura hexagonal, Postgres + Flyway + Redis + RabbitMQ. 46 testes verdes.
+> **Status:** todas as 5 fases do roadmap concluídas. Backend de e-commerce com catálogo, usuários/
+> segurança (JWT RSA, RBAC), pedidos transacionais (lock otimista + idempotência), assíncrono via
+> RabbitMQ (pagamento → `OrderPaid` → fatura/e-mail com DLQ) e cache; pronto para produção com
+> **observabilidade** (Prometheus + Grafana), **Caddy (HTTPS+HSTS)**, **worker separado** e **CI**.
+> Arquitetura hexagonal · Postgres + Flyway + Redis + RabbitMQ · **47 testes verdes**.
 
 ---
 
@@ -16,9 +17,8 @@ roadmap do projeto, mantido fora do versionamento (ver `.gitignore`).
 Java 21 · Spring Boot 3.4 · Maven · Spring Web/Validation/Data JPA · PostgreSQL · Flyway ·
 **Spring Security + OAuth2 Resource Server (JWT RSA)** · **Redis** (refresh tokens, lockout, rate limiting, cache) ·
 **Bucket4j** (rate limiting) · **RabbitMQ / Spring AMQP** (eventos assíncronos, DLQ) ·
-springdoc-openapi (dev) · Actuator (health) · JUnit 5 + Testcontainers.
-
-Observabilidade completa, HTTPS/Caddy e CI/CD entram na Fase 5.
+**Micrometer + Prometheus + Grafana** · **Caddy** (HTTPS) · springdoc-openapi (dev) · Actuator ·
+JUnit 5 + Testcontainers · GitHub Actions (CI).
 
 ## Arquitetura — Hexagonal (Ports & Adapters)
 
@@ -159,6 +159,45 @@ docker compose up -d
   (register → verify → login → `/me`, rotação de refresh, rate limit `429`, 401/403); carrinho →
   checkout → idempotência → cancelamento; pagamento → fatura async; e-mail por fila + **DLQ**; cache. Requer Docker.
 - **Concorrência:** M compradores no último item; o estoque **nunca fica negativo** (lock otimista).
+- **Observabilidade:** a métrica custom `mercury.orders.placed` é instrumentada (Micrometer/Prometheus).
+
+## Produção (deploy)
+
+Topologia (Fase 5):
+
+```mermaid
+flowchart LR
+  client[Cliente] -->|HTTPS| caddy[Caddy<br/>HTTPS + HSTS]
+  caddy --> api1[API #1]
+  caddy --> api2[API #2]
+  subgraph interna[rede interna do compose]
+    api1 --- pg[(Postgres)]
+    api2 --- pg
+    api1 --- redis[(Redis)]
+    api2 --- redis
+    api1 -->|publica| mq{{RabbitMQ}}
+    api2 -->|publica| mq
+    mq -->|consome| worker[Worker]
+    worker --- pg
+    worker --- redis
+    prom[Prometheus] -->|scrape /actuator/prometheus| api1
+    prom --> api2
+    prom --> worker
+    grafana[Grafana] --> prom
+  end
+```
+
+- **API stateless replicada** (consumidores desligados) atrás do **Caddy** (HTTPS automático, HSTS, balanceamento).
+- **Worker separado** (`MERCURY_MESSAGING_CONSUMERS_ENABLED=true`) consome as filas; a API só publica.
+- Postgres/Redis/RabbitMQ/Prometheus **só na rede interna**; o Caddy não roteia `/actuator/*`.
+- **Logs estruturados (JSON/ECS)** com `requestId`; métricas no Prometheus; dashboard provisionado no Grafana.
+
+```bash
+cd deploy
+cp .env.example .env          # defina senhas e as chaves RSA (JWT_PRIVATE_KEY/JWT_PUBLIC_KEY)
+docker compose up -d --build  # caddy + api×2 + worker + postgres + redis + rabbitmq + prometheus + grafana
+```
+- App via Caddy: `https://localhost` (TLS interno) ou o domínio configurado · Grafana: `http://localhost:3000`.
 
 ## Build / Docker
 
@@ -167,7 +206,9 @@ docker compose up -d
 docker build -t mercury-shop:latest .   # multi-stage (runtime JRE 21, usuário não-root)
 ```
 
+CI: **GitHub Actions** (`.github/workflows/ci.yml`) roda `mvnw verify` (Testcontainers) e valida o build da imagem em cada push/PR.
+
 ## Roadmap
 
 Fase 1 ✅ Fundação · Fase 2 ✅ Usuários + Segurança · Fase 3 ✅ Pedidos (checkout/lock otimista/idempotência) ·
-Fase 4 ✅ Assíncrono (RabbitMQ) + cache · Fase 5 Produção (observabilidade, Caddy/HTTPS, compose completo, CI/CD).
+Fase 4 ✅ Assíncrono (RabbitMQ) + cache · **Fase 5 ✅ Produção** (observabilidade, Caddy/HTTPS, compose completo, CI).

@@ -8,6 +8,8 @@ import dev.adastratech.mercuryshop.shared.application.PageQuery;
 import dev.adastratech.mercuryshop.shared.application.PageResult;
 import dev.adastratech.mercuryshop.shared.exception.ConflictException;
 import dev.adastratech.mercuryshop.shared.exception.NotFoundException;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -25,12 +27,15 @@ public class OrderService {
     private final OrderRepository orders;
     private final ProductRepository products;
     private final TransactionTemplate transactionTemplate;
+    private final Counter ordersCancelled;
 
     public OrderService(OrderRepository orders, ProductRepository products,
-                        PlatformTransactionManager transactionManager) {
+                        PlatformTransactionManager transactionManager, MeterRegistry meterRegistry) {
         this.orders = orders;
         this.products = products;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.ordersCancelled = Counter.builder("mercury.orders.cancelled")
+                .description("Pedidos cancelados").register(meterRegistry);
     }
 
     @Transactional(readOnly = true)
@@ -59,7 +64,9 @@ public class OrderService {
         while (true) {
             attempt++;
             try {
-                return transactionTemplate.execute(status -> cancelInTransaction(orderId, requesterId, admin));
+                Order cancelled = transactionTemplate.execute(status -> cancelInTransaction(orderId, requesterId, admin));
+                ordersCancelled.increment();
+                return cancelled;
             } catch (ObjectOptimisticLockingFailureException conflict) {
                 if (attempt >= MAX_ATTEMPTS) {
                     throw new ConflictException("Não foi possível cancelar por concorrência; tente novamente.");

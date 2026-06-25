@@ -6,10 +6,12 @@ import dev.adastratech.mercuryshop.shared.messaging.RabbitConfig;
 import dev.adastratech.mercuryshop.user.domain.UserRepository;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /** Worker que, ao receber OrderPaid, publica o e-mail de confirmação do pedido. */
 @Component
+@ConditionalOnProperty(name = "mercury.messaging.consumers.enabled", matchIfMissing = true)
 class OrderPaidNotificationWorker {
 
     private final UserRepository users;

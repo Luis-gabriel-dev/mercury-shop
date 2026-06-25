@@ -11,6 +11,8 @@ import dev.adastratech.mercuryshop.product.domain.ProductRepository;
 import dev.adastratech.mercuryshop.shared.exception.ConflictException;
 import dev.adastratech.mercuryshop.shared.exception.UnprocessableEntityException;
 import dev.adastratech.mercuryshop.shared.idempotency.IdempotencyStore;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -38,14 +40,18 @@ public class CheckoutService {
     private final OrderRepository orders;
     private final IdempotencyStore idempotency;
     private final TransactionTemplate transactionTemplate;
+    private final Counter ordersPlaced;
 
     public CheckoutService(CartRepository carts, ProductRepository products, OrderRepository orders,
-                           IdempotencyStore idempotency, PlatformTransactionManager transactionManager) {
+                           IdempotencyStore idempotency, PlatformTransactionManager transactionManager,
+                           MeterRegistry meterRegistry) {
         this.carts = carts;
         this.products = products;
         this.orders = orders;
         this.idempotency = idempotency;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.ordersPlaced = Counter.builder("mercury.orders.placed")
+                .description("Pedidos criados no checkout").register(meterRegistry);
     }
 
     public Order checkout(UUID userId, String idempotencyKey) {
@@ -67,6 +73,7 @@ public class CheckoutService {
         // Pós-commit (fora da transação do banco): limpa o carrinho e registra a idempotência.
         carts.deleteByUserId(userId);
         idempotency.save(idempotencyKey, order.getId(), IDEMPOTENCY_TTL);
+        ordersPlaced.increment();
         return order;
     }
 

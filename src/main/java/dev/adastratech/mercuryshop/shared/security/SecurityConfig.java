@@ -54,7 +54,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/v1/auth/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/v1/auth/verify").permitAll()
                         .requestMatchers(HttpMethod.GET, "/v1/products/**", "/v1/categories/**").permitAll()
-                        .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         // Próprio usuário autenticado (antes das regras de ADMIN sobre /v1/users/*)
                         .requestMatchers("/v1/users/me", "/v1/users/me/**").authenticated()

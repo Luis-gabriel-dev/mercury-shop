@@ -1,0 +1,27 @@
+{
+	# E-mail para o ACME (Let's Encrypt). Ajuste para o seu.
+	email admin@adastratech.dev
+}
+
+# --- Produção: HTTPS automático + HSTS ---
+mercury-shop.adastratech.dev {
+	encode gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+	# Não expõe o Actuator/métricas publicamente (Prometheus faz scrape pela rede interna).
+	handle /actuator/* {
+		respond 404
+	}
+
+	# Balanceia entre as réplicas da API (DNS do compose resolve para vários IPs).
+	reverse_proxy api:8080
+}
+
+# --- Teste local: TLS interno autoassinado em https://localhost ---
+localhost {
+	tls internal
+	handle /actuator/* {
+		respond 404
+	}
+	reverse_proxy api:8080
+}
