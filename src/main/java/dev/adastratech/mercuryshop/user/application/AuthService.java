@@ -1,5 +1,6 @@
 package dev.adastratech.mercuryshop.user.application;
 
+import dev.adastratech.mercuryshop.shared.exception.ConflictException;
 import dev.adastratech.mercuryshop.shared.exception.ForbiddenException;
 import dev.adastratech.mercuryshop.shared.exception.UnauthorizedException;
 import dev.adastratech.mercuryshop.shared.security.AuditLogger;
@@ -11,6 +12,7 @@ import dev.adastratech.mercuryshop.user.domain.AccessToken;
 import dev.adastratech.mercuryshop.user.domain.AccessTokenIssuer;
 import dev.adastratech.mercuryshop.user.domain.EmailSender;
 import dev.adastratech.mercuryshop.user.domain.LoginAttemptStore;
+import dev.adastratech.mercuryshop.user.domain.MfaChallengeStore;
 import dev.adastratech.mercuryshop.user.domain.OneTimeToken;
 import dev.adastratech.mercuryshop.user.domain.OneTimeTokenRepository;
 import dev.adastratech.mercuryshop.user.domain.PasswordHasher;
@@ -19,6 +21,7 @@ import dev.adastratech.mercuryshop.user.domain.RefreshTokenStore;
 import dev.adastratech.mercuryshop.user.domain.TokenGenerator;
 import dev.adastratech.mercuryshop.user.domain.TokenHashing;
 import dev.adastratech.mercuryshop.user.domain.TokenPurpose;
+import dev.adastratech.mercuryshop.user.domain.Totp;
 import dev.adastratech.mercuryshop.user.domain.User;
 import dev.adastratech.mercuryshop.user.domain.UserRepository;
 import org.springframework.stereotype.Service;
@@ -35,11 +38,14 @@ public class AuthService {
 
     private static final Duration VERIFICATION_TTL = Duration.ofHours(24);
     private static final Duration RESET_TTL = Duration.ofHours(1);
+    private static final Duration EMAIL_CHANGE_TTL = Duration.ofHours(1);
+    private static final Duration MFA_CHALLENGE_TTL = Duration.ofMinutes(5);
     private static final String GENERIC_LOGIN_ERROR = "E-mail ou senha inválidos";
 
     private final UserRepository users;
     private final OneTimeTokenRepository tokens;
     private final RefreshTokenStore refreshTokens;
+    private final MfaChallengeStore mfaChallenges;
     private final LoginAttemptStore loginAttempts;
     private final PasswordHasher passwordHasher;
     private final TokenGenerator tokenGenerator;
@@ -49,12 +55,14 @@ public class AuthService {
     private final Duration refreshTtl;
 
     public AuthService(UserRepository users, OneTimeTokenRepository tokens, RefreshTokenStore refreshTokens,
-                       LoginAttemptStore loginAttempts, PasswordHasher passwordHasher, TokenGenerator tokenGenerator,
+                       MfaChallengeStore mfaChallenges, LoginAttemptStore loginAttempts,
+                       PasswordHasher passwordHasher, TokenGenerator tokenGenerator,
                        AccessTokenIssuer accessTokenIssuer, EmailSender emailSender, AuditLogger audit,
                        SecurityProperties properties) {
         this.users = users;
         this.tokens = tokens;
         this.refreshTokens = refreshTokens;
+        this.mfaChallenges = mfaChallenges;
         this.loginAttempts = loginAttempts;
         this.passwordHasher = passwordHasher;
         this.tokenGenerator = tokenGenerator;
@@ -90,7 +98,7 @@ public class AuthService {
         audit.emailVerified(user.getId());
     }
 
-    public AuthTokens login(LoginCommand command) {
+    public LoginResult login(LoginCommand command) {
         String email = normalize(command.email());
         if (loginAttempts.isLocked(email)) {
             throw new UnauthorizedException(GENERIC_LOGIN_ERROR);
@@ -111,6 +119,31 @@ public class AuthService {
         }
         if (!user.isEmailVerified()) {
             throw new ForbiddenException("EMAIL_NOT_VERIFIED", "E-mail ainda não verificado");
+        }
+        if (user.isMfaEnabled()) {
+            // Senha ok, mas o MFA exige um segundo passo: emite um desafio curto (não emite tokens).
+            String mfaRaw = tokenGenerator.generate();
+            mfaChallenges.save(TokenHashing.sha256(mfaRaw), user.getId(), MFA_CHALLENGE_TTL);
+            return LoginResult.mfaChallenge(mfaRaw);
+        }
+        audit.loginSucceeded(user.getId());
+        return LoginResult.authenticated(issueTokens(user));
+    }
+
+    /** Segunda etapa do login com MFA: valida o desafio + o código TOTP e emite os tokens. */
+    public AuthTokens loginMfa(String mfaToken, String code) {
+        if (mfaToken == null || mfaToken.isBlank()) {
+            throw new UnauthorizedException("Desafio MFA inválido");
+        }
+        UUID userId = mfaChallenges.consume(TokenHashing.sha256(mfaToken))
+                .orElseThrow(() -> new UnauthorizedException("Desafio MFA inválido ou expirado"));
+        User user = users.findById(userId)
+                .orElseThrow(() -> new UnauthorizedException("Desafio MFA inválido"));
+        if (!user.isMfaEnabled() || !Totp.verify(user.getMfaSecret(), code)) {
+            throw new UnauthorizedException("Código MFA inválido");
+        }
+        if (user.isBlocked()) {
+            throw new ForbiddenException("ACCOUNT_BLOCKED", "Conta bloqueada");
         }
         audit.loginSucceeded(user.getId());
         return issueTokens(user);
@@ -171,6 +204,48 @@ public class AuthService {
         tokens.save(token);
         refreshTokens.revokeAllForUser(user.getId()); // encerra sessões existentes
         audit.passwordReset(user.getId());
+    }
+
+    /**
+     * Solicita a troca de e-mail (autenticado, exige a senha atual). Emite um token EMAIL_CHANGE
+     * carregando o novo endereço e envia a confirmação ao NOVO e-mail — a troca só se efetiva ao
+     * confirmar o link, garantindo a posse do novo endereço.
+     */
+    @Transactional
+    public void requestEmailChange(UUID userId, String rawNewEmail, String currentPassword) {
+        User user = users.findById(userId)
+                .orElseThrow(() -> new UnauthorizedException("Não autenticado"));
+        if (!passwordHasher.matches(currentPassword, user.getPasswordHash())) {
+            throw new UnauthorizedException("Senha atual inválida");
+        }
+        String newEmail = normalize(rawNewEmail);
+        if (users.existsByEmail(newEmail)) {
+            throw new ConflictException("E-mail já em uso");
+        }
+        tokens.invalidateAll(userId, TokenPurpose.EMAIL_CHANGE);
+        String raw = tokenGenerator.generate();
+        tokens.save(OneTimeToken.issue(userId, TokenHashing.sha256(raw), TokenPurpose.EMAIL_CHANGE,
+                Instant.now().plus(EMAIL_CHANGE_TTL), newEmail));
+        emailSender.sendEmailChangeVerification(newEmail, raw);
+        audit.emailChangeRequested(userId);
+    }
+
+    /** Confirma a troca de e-mail pelo token enviado ao novo endereço e encerra as sessões. */
+    @Transactional
+    public void confirmEmailChange(String rawToken) {
+        OneTimeToken token = requireValidToken(rawToken, TokenPurpose.EMAIL_CHANGE);
+        User user = users.findById(token.getUserId())
+                .orElseThrow(() -> new UnauthorizedException("Token inválido"));
+        String newEmail = token.getPayload();
+        if (newEmail == null || users.existsByEmail(newEmail)) {
+            throw new ConflictException("Não foi possível concluir a troca de e-mail");
+        }
+        user.changeEmail(newEmail);
+        users.save(user);
+        token.markUsed(Instant.now());
+        tokens.save(token);
+        refreshTokens.revokeAllForUser(user.getId()); // troca de identidade → encerra sessões
+        audit.emailChanged(user.getId());
     }
 
     private OneTimeToken requireValidToken(String rawToken, TokenPurpose purpose) {

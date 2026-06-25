@@ -16,6 +16,7 @@ public class RecordingMailDelivery implements MailDelivery {
 
     private final Map<String, String> verificationTokens = new ConcurrentHashMap<>();
     private final Map<String, String> resetTokens = new ConcurrentHashMap<>();
+    private final Map<String, String> emailChangeTokens = new ConcurrentHashMap<>();
     private final List<EmailMessage> delivered = new CopyOnWriteArrayList<>();
 
     @Override
@@ -28,6 +29,8 @@ public class RecordingMailDelivery implements MailDelivery {
             verificationTokens.put(message.to(), message.payload());
         } else if (EmailMessage.TYPE_PASSWORD_RESET.equals(message.type())) {
             resetTokens.put(message.to(), message.payload());
+        } else if (EmailMessage.TYPE_EMAIL_CHANGE.equals(message.type())) {
+            emailChangeTokens.put(message.to(), message.payload());
         }
     }
 
@@ -37,6 +40,10 @@ public class RecordingMailDelivery implements MailDelivery {
 
     public String resetToken(String to) {
         return resetTokens.get(to);
+    }
+
+    public String emailChangeToken(String to) {
+        return emailChangeTokens.get(to);
     }
 
     public List<EmailMessage> delivered() {

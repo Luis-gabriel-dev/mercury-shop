@@ -28,6 +28,7 @@ class OneTimeTokenPersistenceAdapter implements OneTimeTokenRepository {
         entity.setPurpose(token.getPurpose());
         entity.setExpiresAt(token.getExpiresAt());
         entity.setUsedAt(token.getUsedAt());
+        entity.setPayload(token.getPayload());
         if (token.getCreatedAt() != null) {
             entity.setCreatedAt(token.getCreatedAt());
         }
@@ -48,6 +49,6 @@ class OneTimeTokenPersistenceAdapter implements OneTimeTokenRepository {
     private OneTimeToken toDomain(OneTimeTokenJpaEntity entity) {
         return OneTimeToken.reconstitute(
                 entity.getId(), entity.getUserId(), entity.getTokenHash(), entity.getPurpose(),
-                entity.getExpiresAt(), entity.getUsedAt(), entity.getCreatedAt());
+                entity.getExpiresAt(), entity.getUsedAt(), entity.getCreatedAt(), entity.getPayload());
     }
 }

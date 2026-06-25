@@ -4,8 +4,9 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Token de uso único (verificação de e-mail / reset de senha). Guarda apenas o HASH
- * do token (nunca o valor em texto puro) — briefing seção 7.1.
+ * Token de uso único (verificação de e-mail / reset de senha / troca de e-mail). Guarda apenas o
+ * HASH do token (nunca o valor em texto puro) — briefing seção 7.1. O {@code payload} carrega um
+ * valor associado ao token (ex.: o novo e-mail na troca); nulo nos demais propósitos.
  */
 public class OneTimeToken {
 
@@ -16,9 +17,10 @@ public class OneTimeToken {
     private final Instant expiresAt;
     private Instant usedAt;
     private final Instant createdAt;
+    private final String payload;
 
     private OneTimeToken(UUID id, UUID userId, String tokenHash, TokenPurpose purpose,
-                         Instant expiresAt, Instant usedAt, Instant createdAt) {
+                         Instant expiresAt, Instant usedAt, Instant createdAt, String payload) {
         this.id = id;
         this.userId = userId;
         this.tokenHash = tokenHash;
@@ -26,15 +28,21 @@ public class OneTimeToken {
         this.expiresAt = expiresAt;
         this.usedAt = usedAt;
         this.createdAt = createdAt;
+        this.payload = payload;
     }
 
     public static OneTimeToken issue(UUID userId, String tokenHash, TokenPurpose purpose, Instant expiresAt) {
-        return new OneTimeToken(UUID.randomUUID(), userId, tokenHash, purpose, expiresAt, null, null);
+        return issue(userId, tokenHash, purpose, expiresAt, null);
+    }
+
+    public static OneTimeToken issue(UUID userId, String tokenHash, TokenPurpose purpose,
+                                     Instant expiresAt, String payload) {
+        return new OneTimeToken(UUID.randomUUID(), userId, tokenHash, purpose, expiresAt, null, null, payload);
     }
 
     public static OneTimeToken reconstitute(UUID id, UUID userId, String tokenHash, TokenPurpose purpose,
-                                            Instant expiresAt, Instant usedAt, Instant createdAt) {
-        return new OneTimeToken(id, userId, tokenHash, purpose, expiresAt, usedAt, createdAt);
+                                            Instant expiresAt, Instant usedAt, Instant createdAt, String payload) {
+        return new OneTimeToken(id, userId, tokenHash, purpose, expiresAt, usedAt, createdAt, payload);
     }
 
     public boolean isUsed() {
@@ -79,5 +87,9 @@ public class OneTimeToken {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getPayload() {
+        return payload;
     }
 }

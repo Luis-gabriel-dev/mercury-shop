@@ -57,6 +57,26 @@ public class AuditLogger {
         emit("REFRESH_TOKEN_REUSE_DETECTED", "userId=" + userId);
     }
 
+    public void emailChangeRequested(UUID userId) {
+        emit("EMAIL_CHANGE_REQUESTED", "userId=" + userId);
+    }
+
+    public void emailChanged(UUID userId) {
+        emit("EMAIL_CHANGED", "userId=" + userId);
+    }
+
+    public void mfaEnabled(UUID userId) {
+        emit("MFA_ENABLED", "userId=" + userId);
+    }
+
+    public void mfaDisabled(UUID userId) {
+        emit("MFA_DISABLED", "userId=" + userId);
+    }
+
+    public void accountDeleted(UUID userId) {
+        emit("ACCOUNT_DELETED", "userId=" + userId);
+    }
+
     private void emit(String event, String detail) {
         log.info("event={} {} requestId={}", event, detail, MDC.get(RequestIdFilter.MDC_KEY));
     }

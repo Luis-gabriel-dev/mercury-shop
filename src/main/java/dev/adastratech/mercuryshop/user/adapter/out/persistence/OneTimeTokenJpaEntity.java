@@ -38,6 +38,9 @@ public class OneTimeTokenJpaEntity {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(length = 254)
+    private String payload;
+
     protected OneTimeTokenJpaEntity() {
     }
 
@@ -102,5 +105,13 @@ public class OneTimeTokenJpaEntity {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getPayload() {
+        return payload;
+    }
+
+    public void setPayload(String payload) {
+        this.payload = payload;
     }
 }

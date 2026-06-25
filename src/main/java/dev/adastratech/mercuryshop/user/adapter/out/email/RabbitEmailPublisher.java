@@ -29,6 +29,11 @@ class RabbitEmailPublisher implements EmailSender {
         publish(new EmailMessage(email, EmailMessage.TYPE_PASSWORD_RESET, rawToken));
     }
 
+    @Override
+    public void sendEmailChangeVerification(String newEmail, String rawToken) {
+        publish(new EmailMessage(newEmail, EmailMessage.TYPE_EMAIL_CHANGE, rawToken));
+    }
+
     private void publish(EmailMessage message) {
         rabbitTemplate.convertAndSend(RabbitConfig.EXCHANGE, RabbitConfig.RK_EMAIL, message);
     }

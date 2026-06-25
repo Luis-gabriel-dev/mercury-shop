@@ -3,12 +3,15 @@ package dev.adastratech.mercuryshop.user.adapter.in.web;
 import dev.adastratech.mercuryshop.user.adapter.in.web.dto.ForgotPasswordRequest;
 import dev.adastratech.mercuryshop.user.adapter.in.web.dto.LoginRequest;
 import dev.adastratech.mercuryshop.user.adapter.in.web.dto.MessageResponse;
+import dev.adastratech.mercuryshop.user.adapter.in.web.dto.MfaChallengeResponse;
+import dev.adastratech.mercuryshop.user.adapter.in.web.dto.MfaLoginRequest;
 import dev.adastratech.mercuryshop.user.adapter.in.web.dto.RegisterRequest;
 import dev.adastratech.mercuryshop.user.adapter.in.web.dto.ResetPasswordRequest;
 import dev.adastratech.mercuryshop.user.adapter.in.web.dto.TokenResponse;
 import dev.adastratech.mercuryshop.user.adapter.in.web.dto.UserResponse;
 import dev.adastratech.mercuryshop.user.application.AuthService;
 import dev.adastratech.mercuryshop.user.application.AuthTokens;
+import dev.adastratech.mercuryshop.user.application.LoginResult;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -50,9 +53,28 @@ class AuthController {
         return new MessageResponse("E-mail verificado com sucesso");
     }
 
+    @GetMapping("/confirm-email-change")
+    MessageResponse confirmEmailChange(@RequestParam String token) {
+        authService.confirmEmailChange(token);
+        return new MessageResponse("E-mail atualizado com sucesso");
+    }
+
     @PostMapping("/login")
-    ResponseEntity<TokenResponse> login(@Valid @RequestBody LoginRequest request) {
-        AuthTokens tokens = authService.login(UserWebMapper.toCommand(request));
+    ResponseEntity<?> login(@Valid @RequestBody LoginRequest request) {
+        LoginResult result = authService.login(UserWebMapper.toCommand(request));
+        if (result.mfaRequired()) {
+            // MFA ativo: nenhum token ainda; o cliente confirma o código em /login/mfa.
+            return ResponseEntity.ok(new MfaChallengeResponse(true, result.mfaToken()));
+        }
+        return tokenResponse(result.tokens());
+    }
+
+    @PostMapping("/login/mfa")
+    ResponseEntity<TokenResponse> loginMfa(@Valid @RequestBody MfaLoginRequest request) {
+        return tokenResponse(authService.loginMfa(request.mfaToken(), request.code()));
+    }
+
+    private ResponseEntity<TokenResponse> tokenResponse(AuthTokens tokens) {
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, refreshCookie(tokens).toString())
                 .body(UserWebMapper.toTokenResponse(tokens));

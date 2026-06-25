@@ -82,6 +82,8 @@ class UserPersistenceAdapter implements UserRepository {
         entity.setPhone(user.getPhone());
         entity.setStatus(user.getStatus());
         entity.setEmailVerified(user.isEmailVerified());
+        entity.setMfaSecret(user.getMfaSecret());
+        entity.setMfaEnabled(user.isMfaEnabled());
         Set<dev.adastratech.mercuryshop.user.domain.Role> roles = user.getRoles();
         entity.setRoles(roles.isEmpty()
                 ? EnumSet.noneOf(dev.adastratech.mercuryshop.user.domain.Role.class)
@@ -91,7 +93,8 @@ class UserPersistenceAdapter implements UserRepository {
     private User toDomain(UserJpaEntity entity) {
         return User.reconstitute(
                 entity.getId(), entity.getEmail(), entity.getPasswordHash(), entity.getFullName(),
-                entity.getPhone(), entity.getStatus(), entity.isEmailVerified(), entity.getRoles(),
+                entity.getPhone(), entity.getStatus(), entity.isEmailVerified(),
+                entity.getMfaSecret(), entity.isMfaEnabled(), entity.getRoles(),
                 entity.getVersion(), entity.getCreatedAt(), entity.getUpdatedAt());
     }
 }

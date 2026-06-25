@@ -9,4 +9,7 @@ public interface EmailSender {
     void sendEmailVerification(String email, String rawToken);
 
     void sendPasswordReset(String email, String rawToken);
+
+    /** Verificação enviada ao NOVO e-mail ao solicitar uma troca de endereço. */
+    void sendEmailChangeVerification(String newEmail, String rawToken);
 }

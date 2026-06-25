@@ -52,7 +52,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Público
                         .requestMatchers(HttpMethod.POST, "/v1/auth/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/v1/auth/verify").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/v1/auth/verify", "/v1/auth/confirm-email-change").permitAll()
                         .requestMatchers(HttpMethod.GET, "/v1/products/**", "/v1/categories/**").permitAll()
                         // Webhook do gateway de pagamento: protegido pela verificação de assinatura, não por JWT.
                         .requestMatchers(HttpMethod.POST, "/v1/payments/webhook").permitAll()

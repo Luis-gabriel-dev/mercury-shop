@@ -21,14 +21,16 @@ public class User {
     private String phone;
     private UserStatus status;
     private boolean emailVerified;
+    private String mfaSecret;
+    private boolean mfaEnabled;
     private final EnumSet<Role> roles;
     private final Long version;
     private final Instant createdAt;
     private final Instant updatedAt;
 
     private User(UUID id, String email, String passwordHash, String fullName, String phone,
-                 UserStatus status, boolean emailVerified, Set<Role> roles, Long version,
-                 Instant createdAt, Instant updatedAt) {
+                 UserStatus status, boolean emailVerified, String mfaSecret, boolean mfaEnabled,
+                 Set<Role> roles, Long version, Instant createdAt, Instant updatedAt) {
         this.id = id;
         this.email = normalizeEmail(email);
         this.passwordHash = requirePasswordHash(passwordHash);
@@ -36,6 +38,8 @@ public class User {
         this.phone = phone;
         this.status = status;
         this.emailVerified = emailVerified;
+        this.mfaSecret = mfaSecret;
+        this.mfaEnabled = mfaEnabled;
         this.roles = roles.isEmpty() ? EnumSet.noneOf(Role.class) : EnumSet.copyOf(roles);
         this.version = version;
         this.createdAt = createdAt;
@@ -45,14 +49,14 @@ public class User {
     /** Novo cadastro: PENDING_VERIFICATION, e-mail não verificado, papel CUSTOMER. */
     public static User register(String email, String passwordHash, String fullName, String phone) {
         return new User(UUID.randomUUID(), email, passwordHash, fullName, phone,
-                UserStatus.PENDING_VERIFICATION, false, EnumSet.of(Role.CUSTOMER), null, null, null);
+                UserStatus.PENDING_VERIFICATION, false, null, false, EnumSet.of(Role.CUSTOMER), null, null, null);
     }
 
     public static User reconstitute(UUID id, String email, String passwordHash, String fullName, String phone,
-                                    UserStatus status, boolean emailVerified, Set<Role> roles, Long version,
-                                    Instant createdAt, Instant updatedAt) {
-        return new User(id, email, passwordHash, fullName, phone, status, emailVerified, roles,
-                version, createdAt, updatedAt);
+                                    UserStatus status, boolean emailVerified, String mfaSecret, boolean mfaEnabled,
+                                    Set<Role> roles, Long version, Instant createdAt, Instant updatedAt) {
+        return new User(id, email, passwordHash, fullName, phone, status, emailVerified, mfaSecret, mfaEnabled,
+                roles, version, createdAt, updatedAt);
     }
 
     public void verifyEmail() {
@@ -66,6 +70,12 @@ public class User {
         this.passwordHash = requirePasswordHash(passwordHash);
     }
 
+    /** Aplica a troca de e-mail já confirmada no novo endereço. */
+    public void changeEmail(String newEmail) {
+        this.email = normalizeEmail(newEmail);
+        this.emailVerified = true;
+    }
+
     public void updateProfile(String fullName, String phone) {
         if (fullName != null) {
             this.fullName = fullName;
@@ -73,6 +83,42 @@ public class User {
         if (phone != null) {
             this.phone = phone;
         }
+    }
+
+    /** Inicia a ativação do MFA: guarda o segredo, mas só vale após confirmar um código. */
+    public void startMfaSetup(String secret) {
+        this.mfaSecret = secret;
+        this.mfaEnabled = false;
+    }
+
+    /** Conclui a ativação do MFA (após um código TOTP válido). */
+    public void enableMfa() {
+        if (this.mfaSecret == null) {
+            throw new IllegalStateException("MFA não foi iniciado");
+        }
+        this.mfaEnabled = true;
+    }
+
+    public void disableMfa() {
+        this.mfaSecret = null;
+        this.mfaEnabled = false;
+    }
+
+    /**
+     * Anonimiza a conta (LGPD / direito ao esquecimento): remove os dados pessoais, invalida o login
+     * (e-mail placeholder + hash inutilizável) e marca como DELETED. Os pedidos são mantidos à parte
+     * como registros financeiros, agora sem PII vinculada.
+     */
+    public void anonymize(String placeholderEmail, String unusablePasswordHash) {
+        this.email = normalizeEmail(placeholderEmail);
+        this.passwordHash = requirePasswordHash(unusablePasswordHash);
+        this.fullName = null;
+        this.phone = null;
+        this.emailVerified = false;
+        this.mfaSecret = null;
+        this.mfaEnabled = false;
+        this.status = UserStatus.DELETED;
+        this.roles.clear();
     }
 
     public void block() {
@@ -93,6 +139,10 @@ public class User {
 
     public boolean isBlocked() {
         return status == UserStatus.BLOCKED;
+    }
+
+    public boolean isMfaEnabled() {
+        return mfaEnabled;
     }
 
     private static String normalizeEmail(String email) {
@@ -135,6 +185,10 @@ public class User {
 
     public boolean isEmailVerified() {
         return emailVerified;
+    }
+
+    public String getMfaSecret() {
+        return mfaSecret;
     }
 
     /** Cópia imutável dos papéis. */

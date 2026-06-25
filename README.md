@@ -75,6 +75,17 @@ shared/
 - **DTOs sempre** (entidades JPA nunca serializadas); `passwordHash`/`version` nunca saem nas respostas.
 - Auditoria estruturada de eventos de segurança com `request_id` e e-mail mascarado.
 
+### Decisões da Fase 8 (segurança avançada)
+- **MFA/TOTP** (RFC 6238) implementado no domínio (sem dependência). Com MFA ativo, o login vira duas
+  etapas: senha → desafio curto (`mfaToken` no Redis) → código TOTP em `/login/mfa` → tokens.
+- **Detecção de reuso de refresh token**: a rotação marca o token como "usado"; reapresentá-lo indica
+  roubo → **revoga toda a família** de refresh tokens (força novo login em todos os dispositivos).
+- **Troca de e-mail com re-verificação**: o token de troca carrega o novo e-mail e a confirmação é
+  enviada ao **novo** endereço — a troca só se efetiva ao confirmar (prova de posse).
+- **LGPD**: exportação dos dados pessoais (portabilidade) e exclusão por **anonimização** (os pedidos,
+  registros financeiros, são preservados sem PII).
+- **Scan de dependências** no CI (GitHub Dependency Review) falha PRs com vulnerabilidades de severidade alta.
+
 ### Decisões da Fase 7 (pagamento real)
 - **Pagamento assíncrono via gateway**: `/pay` cria um **PaymentIntent** (Stripe) e devolve o `clientSecret`;
   o pedido só vira `PAID` quando o **webhook** de sucesso chega. Espelha o fluxo real de gateways.
@@ -105,11 +116,13 @@ shared/
 |---|---|---|
 | POST | `/register` | cadastro (cria `PENDING_VERIFICATION`, dispara e-mail de verificação) |
 | GET | `/verify?token=` | ativa a conta |
-| POST | `/login` | retorna access token (JWT) + cookie `refresh_token` |
-| POST | `/refresh` | novo access token, rotaciona o refresh (lê o cookie) |
+| POST | `/login` | access token (JWT) + cookie `refresh_token`; com MFA ativo, devolve `{mfaRequired, mfaToken}` |
+| POST | `/login/mfa` | segunda etapa do MFA: `{mfaToken, code}` → tokens |
+| POST | `/refresh` | novo access token, rotaciona o refresh; **reuso de token rotacionado revoga a família** |
 | POST | `/logout` | revoga o refresh token |
 | POST | `/forgot-password` | envia token de reset (resposta sempre genérica) |
 | POST | `/reset-password` | redefine a senha |
+| GET | `/confirm-email-change?token=` | confirma a troca de e-mail (link enviado ao novo endereço) |
 
 ### Usuário (`/v1/users`)
 | Método | Rota | Acesso |
@@ -117,6 +130,10 @@ shared/
 | GET | `/me` | autenticado |
 | PATCH | `/me` | autenticado |
 | POST | `/me/change-password` | autenticado (exige senha atual) |
+| POST | `/me/change-email` | autenticado (exige senha); confirma no novo e-mail |
+| POST | `/me/mfa/setup` · `/enable` · `/disable` | autenticado — ativa/desativa MFA (TOTP) |
+| GET | `/me/export` | autenticado — exporta os dados pessoais (LGPD) |
+| DELETE | `/me` | autenticado (exige senha) — exclui a conta (anonimização, LGPD) |
 | GET | `/` · `/{id}` | **ADMIN** |
 
 ### Catálogo (`/v1`)
@@ -239,7 +256,8 @@ CI: **GitHub Actions** (`.github/workflows/ci.yml`) roda `mvnw verify` (Testcont
 Fase 1 ✅ Fundação · Fase 2 ✅ Usuários + Segurança · Fase 3 ✅ Pedidos (checkout/lock otimista/idempotência) ·
 Fase 4 ✅ Assíncrono (RabbitMQ) + cache · Fase 5 ✅ Produção (observabilidade, Caddy/HTTPS, compose completo, CI) ·
 Fase 6 ✅ Núcleo (Transactional Outbox, ciclo SHIPPED/DELIVERED, reserva de estoque por expiração, ArchUnit) ·
-**Fase 7 ✅ Pagamento real** (Stripe — PaymentIntent + webhook idempotente assinado).
+Fase 7 ✅ Pagamento real (Stripe — PaymentIntent + webhook idempotente assinado) ·
+**Fase 8 ✅ Segurança avançada** (MFA/TOTP, detecção de reuso de refresh, troca de e-mail, LGPD, scan no CI).
 
-Evolução planejada (ver plano interno): Fase 8 — segurança avançada (MFA/TOTP, detecção de reuso de refresh,
-LGPD) · Fase 9 — ops & CD (OpenTelemetry, Alertmanager, deploy).
+Evolução planejada (ver plano interno): Fase 9 — ops & CD (OpenTelemetry, Alertmanager, push de imagem + deploy,
+busca full-text, dashboards de negócio).
