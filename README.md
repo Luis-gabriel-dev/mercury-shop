@@ -4,29 +4,32 @@ E-commerce / Order Management API — backend RESTful seguro e escalável.
 A especificação completa (fonte de verdade) fica no documento interno de instruções e
 roadmap do projeto, mantido fora do versionamento (ver `.gitignore`).
 
-> **Status:** Fase 3 (Núcleo de pedidos) concluída — sobre as Fases 1 (catálogo) e 2 (usuários +
-> segurança), agora com **carrinho** (Redis), **checkout transacional** com baixa de estoque sob
-> **lock otimista**, **idempotência** (Idempotency-Key) e cancelamento. Arquitetura hexagonal,
-> Postgres + Flyway + Redis. 41 testes verdes, incluindo teste de concorrência.
+> **Status:** Fase 4 (Assíncrono + cache) concluída — sobre as Fases 1–3, agora com **pagamento**
+> (PENDING→PAID), evento **`OrderPaid`** via **RabbitMQ** → workers de **fatura** e **e-mail de
+> confirmação** com **DLQ**, e-mails saindo por **fila**, e **cache do catálogo** no Redis.
+> Arquitetura hexagonal, Postgres + Flyway + Redis + RabbitMQ. 46 testes verdes.
 
 ---
 
 ## Stack
 
 Java 21 · Spring Boot 3.4 · Maven · Spring Web/Validation/Data JPA · PostgreSQL · Flyway ·
-**Spring Security + OAuth2 Resource Server (JWT RSA)** · **Redis** (refresh tokens, lockout, rate limiting) ·
-**Bucket4j** (rate limiting) · springdoc-openapi (dev) · Actuator (health) · JUnit 5 + Testcontainers.
+**Spring Security + OAuth2 Resource Server (JWT RSA)** · **Redis** (refresh tokens, lockout, rate limiting, cache) ·
+**Bucket4j** (rate limiting) · **RabbitMQ / Spring AMQP** (eventos assíncronos, DLQ) ·
+springdoc-openapi (dev) · Actuator (health) · JUnit 5 + Testcontainers.
 
-RabbitMQ (assíncrono) e observabilidade completa entram nas fases seguintes.
+Observabilidade completa, HTTPS/Caddy e CI/CD entram na Fase 5.
 
 ## Arquitetura — Hexagonal (Ports & Adapters)
 
 O domínio não conhece HTTP nem JPA. Cada feature segue `domain → application → adapter`:
 
 ```
-product/   catálogo (Fase 1)
+product/   catálogo (Fase 1) — leitura cacheada no Redis (Fase 4)
 cart/      carrinho por usuário no Redis (Fase 3)
 order/     checkout transacional, lock otimista, idempotência, cancelamento (Fase 3)
+payment/   pagamento (PENDING→PAID) + evento OrderPaid (Fase 4)
+invoice/   geração de fatura por worker ao receber OrderPaid (Fase 4)
 user/      cadastro, autenticação, RBAC (Fase 2)
   domain/         User, Role, UserStatus, OneTimeToken, PasswordPolicy + portas
                   (UserRepository, RefreshTokenStore, LoginAttemptStore, PasswordHasher,
@@ -37,14 +40,26 @@ user/      cadastro, autenticação, RBAC (Fase 2)
     out/persistence/  JPA (users, user_roles, one_time_tokens)
     out/security/     BCrypt, emissor de JWT RSA, gerador de tokens
     out/redis/        refresh tokens (rotação/revogação) e bloqueio de login
-    out/email/        stub assíncrono (loga o link; RabbitMQ na Fase 4)
+    out/email/        publica e-mails na fila (RabbitMQ)
+    in/messaging/     EmailWorker (consome a fila e entrega; falha → DLQ)
 shared/
   security/       SecurityConfig (deny-by-default, RBAC, headers, CORS), JWT (RSA),
                   RateLimitingFilter (Bucket4j+Redis), AuditLogger
+  messaging/      RabbitConfig (exchange/DLX/filas/DLQ), DomainEventPublisher, eventos (OrderPaid)
+  idempotency/    IdempotencyStore (Redis) para o checkout
   exception/      GlobalExceptionHandler + ApiError (formato de erro padrão)
   web/            RequestIdFilter (request_id por requisição)
+  config/         CacheConfig (@EnableCaching), AsyncConfig
   application/    PageQuery / PageResult (paginação independente de framework)
 ```
+
+### Decisões de assíncrono/cache (Fase 4)
+- **Pagamento stub** marca o pedido `PAID` e publica **`OrderPaid`** **após o commit** (não emite em rollback).
+- **Workers** consomem `OrderPaid`: geram **fatura** (idempotente por pedido) e publicam o **e-mail de confirmação**.
+- **E-mails por fila**: verificação/reset/confirmação são publicados; um worker entrega (stub/log) com **retry → DLQ**.
+- **Estoque**: a baixa ocorre no checkout (Fase 3); os workers de `OrderPaid` **não** redecrementam (trade-off documentado).
+- **Cache do catálogo** (Redis, TTL 10 min): `GET /v1/products/{id}` é cacheado; edição/remoção fazem evict.
+  Mudanças de estoque no checkout refletem no detalhe do produto por TTL (consistência eventual).
 
 ### Decisões de segurança (Fase 2)
 - **Access token = JWT RSA (RS256)**, vida 15 min, payload só `sub`+`roles`+`exp`. Chaves de env;
@@ -97,6 +112,7 @@ Leitura (`GET /v1/products`, `/v1/categories`) **pública**; escrita (`POST/PATC
 |---|---|---|
 | POST | `/v1/orders` | checkout do carrinho — header **`Idempotency-Key` obrigatório**; baixa estoque (lock otimista) → `PENDING` |
 | GET | `/v1/orders` · `/v1/orders/{id}` | próprios pedidos (outro usuário → 404) |
+| POST | `/v1/orders/{id}/pay` | paga o pedido (`PENDING`→`PAID`) e dispara `OrderPaid` (fatura + e-mail async) |
 | POST | `/v1/orders/{id}/cancel` | cancela `PENDING` e restaura estoque |
 | GET | `/v1/admin/orders` | todos os pedidos (**ADMIN**) |
 
@@ -114,7 +130,7 @@ Pré-requisitos: **Java 21**, **Docker**. Maven **não** é necessário — use 
 # 1. Variáveis de ambiente
 cp .env.example .env            # ajuste as credenciais
 
-# 2. Sobe Postgres + Redis
+# 2. Sobe Postgres + Redis + RabbitMQ
 docker compose up -d
 
 # 3. Roda a aplicação no perfil dev (sem JWT_*_KEY no .env, gera par RSA efêmero)
@@ -124,6 +140,7 @@ docker compose up -d
 ```
 
 - API: `http://localhost:8080` · Swagger (dev): `/swagger-ui.html` · Health: `/actuator/health`
+- RabbitMQ (dev): painel em `http://localhost:15672` (filas `q.email`, `q.order-paid.*` e suas `*.dlq`)
 - Para chaves RSA fixas em prod, gere e injete via env (`JWT_PRIVATE_KEY`/`JWT_PUBLIC_KEY`):
   ```bash
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out jwt-private.pem
@@ -138,9 +155,9 @@ docker compose up -d
 ```
 
 - **Unitários:** invariantes de domínio (`Product`, `User`, `PasswordPolicy`, `Order`, `Cart`) — sem Spring.
-- **Integração (Testcontainers, Postgres + Redis):** catálogo com RBAC; fluxo de auth (register →
-  verify → login → `/me`, rotação de refresh, rate limit `429`, 401/403); carrinho → checkout →
-  idempotência → cancelamento. Requer Docker.
+- **Integração (Testcontainers, Postgres + Redis + RabbitMQ):** catálogo com RBAC; fluxo de auth
+  (register → verify → login → `/me`, rotação de refresh, rate limit `429`, 401/403); carrinho →
+  checkout → idempotência → cancelamento; pagamento → fatura async; e-mail por fila + **DLQ**; cache. Requer Docker.
 - **Concorrência:** M compradores no último item; o estoque **nunca fica negativo** (lock otimista).
 
 ## Build / Docker
@@ -153,4 +170,4 @@ docker build -t mercury-shop:latest .   # multi-stage (runtime JRE 21, usuário 
 ## Roadmap
 
 Fase 1 ✅ Fundação · Fase 2 ✅ Usuários + Segurança · Fase 3 ✅ Pedidos (checkout/lock otimista/idempotência) ·
-Fase 4 Assíncrono (RabbitMQ) + cache · Fase 5 Produção (observabilidade, Caddy/HTTPS, compose completo, CI/CD).
+Fase 4 ✅ Assíncrono (RabbitMQ) + cache · Fase 5 Produção (observabilidade, Caddy/HTTPS, compose completo, CI/CD).

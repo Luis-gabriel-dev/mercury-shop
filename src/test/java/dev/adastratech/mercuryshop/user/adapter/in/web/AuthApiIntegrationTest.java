@@ -2,36 +2,31 @@ package dev.adastratech.mercuryshop.user.adapter.in.web;
 
 import com.jayway.jsonpath.JsonPath;
 import dev.adastratech.mercuryshop.support.IntegrationTestSupport;
-import dev.adastratech.mercuryshop.user.domain.EmailSender;
+import dev.adastratech.mercuryshop.support.RecordingMailDelivery;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MvcResult;
 
-import java.util.Map;
+import java.time.Duration;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.assertj.core.api.Assertions.assertThat;
 
-@Import(AuthApiIntegrationTest.TestEmailConfig.class)
 class AuthApiIntegrationTest extends IntegrationTestSupport {
 
     private static final String PASSWORD = "Str0ng!Passw0rd";
 
     @Autowired
-    private RecordingEmailSender emails;
+    private RecordingMailDelivery mail;
 
     @Test
     void registerHidesSecretsAndStartsPending() throws Exception {
@@ -120,14 +115,12 @@ class AuthApiIntegrationTest extends IntegrationTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").exists());
 
-        // O refresh token antigo foi rotacionado: reutilizá-lo falha.
         mockMvc.perform(post("/v1/auth/refresh").cookie(refresh))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     void rateLimitsLoginAttempts() throws Exception {
-        // IP dedicado para não interferir nos demais testes; estoura a capacidade (default 10).
         MvcResult last = null;
         for (int i = 0; i < 16; i++) {
             last = mockMvc.perform(post("/v1/auth/login")
@@ -150,8 +143,9 @@ class AuthApiIntegrationTest extends IntegrationTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registerBody(email)))
                 .andExpect(status().isCreated());
-        String token = emails.verificationTokens.get(email);
-        mockMvc.perform(get("/v1/auth/verify").param("token", token))
+        // e-mail de verificação chega de forma assíncrona (fila → worker → entrega capturada).
+        await().atMost(Duration.ofSeconds(10)).until(() -> mail.verificationToken(email) != null);
+        mockMvc.perform(get("/v1/auth/verify").param("token", mail.verificationToken(email)))
                 .andExpect(status().isOk());
     }
 
@@ -177,30 +171,5 @@ class AuthApiIntegrationTest extends IntegrationTestSupport {
 
     private static String newEmail() {
         return "u" + UUID.randomUUID().toString().replace("-", "") + "@example.com";
-    }
-
-    @TestConfiguration
-    static class TestEmailConfig {
-        @Bean
-        @Primary
-        RecordingEmailSender recordingEmailSender() {
-            return new RecordingEmailSender();
-        }
-    }
-
-    /** Captura os tokens que iriam por e-mail, para o teste poder verificar/redefinir via API. */
-    static class RecordingEmailSender implements EmailSender {
-        final Map<String, String> verificationTokens = new ConcurrentHashMap<>();
-        final Map<String, String> resetTokens = new ConcurrentHashMap<>();
-
-        @Override
-        public void sendEmailVerification(String email, String rawToken) {
-            verificationTokens.put(email, rawToken);
-        }
-
-        @Override
-        public void sendPasswordReset(String email, String rawToken) {
-            resetTokens.put(email, rawToken);
-        }
     }
 }

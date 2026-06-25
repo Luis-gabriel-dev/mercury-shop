@@ -1,5 +1,6 @@
 package dev.adastratech.mercuryshop.product.domain;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -8,8 +9,11 @@ import java.util.UUID;
  * Modelo de domínio de Produto — puro, sem dependência de JPA/HTTP.
  * Mantém as invariantes do catálogo (preço e estoque não-negativos, nome obrigatório).
  * O campo {@code version} prepara o terreno para o lock otimista da Fase 3.
+ * Implementa {@link Serializable} para poder ser cacheado no Redis (Fase 4).
  */
-public class Product {
+public class Product implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final UUID id;
     private String name;

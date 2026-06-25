@@ -60,6 +60,14 @@ public class Order {
         this.status = OrderStatus.CANCELLED;
     }
 
+    /** Marca como pago (PENDING → PAID). */
+    public void markPaid() {
+        if (status != OrderStatus.PENDING) {
+            throw new IllegalStateException("Apenas pedidos pendentes podem ser pagos");
+        }
+        this.status = OrderStatus.PAID;
+    }
+
     public boolean belongsTo(UUID candidateUserId) {
         return userId.equals(candidateUserId);
     }

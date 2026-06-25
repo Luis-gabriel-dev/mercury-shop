@@ -22,6 +22,24 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:mercury}
+    password: ${RABBITMQ_PASSWORD:mercury}
+    listener:
+      simple:
+        # Ao esgotar as tentativas, rejeita sem requeue → vai para a DLQ via x-dead-letter-exchange.
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 200ms
+          multiplier: 2
+  cache:
+    type: redis
+    redis:
+      time-to-live: 10m
 
 server:
   port: 8080

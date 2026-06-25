@@ -32,6 +32,24 @@ services:
       timeout: 3s
       retries: 10
 
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: mercury-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-mercury}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-mercury}
+    ports:
+      - "5672:5672"
+      - "15672:15672"   # painel de gerenciamento (apenas dev)
+    volumes:
+      - mercury-rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   mercury-pg-data:
   mercury-redis-data:
+  mercury-rabbitmq-data:

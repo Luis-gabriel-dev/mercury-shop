@@ -9,6 +9,8 @@ import dev.adastratech.mercuryshop.product.domain.ProductRepository;
 import dev.adastratech.mercuryshop.shared.application.PageQuery;
 import dev.adastratech.mercuryshop.shared.application.PageResult;
 import dev.adastratech.mercuryshop.shared.exception.NotFoundException;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +37,7 @@ public class ProductService {
         return products.save(product);
     }
 
+    @Cacheable(value = "products", key = "#id")
     @Transactional(readOnly = true)
     public Product get(UUID id) {
         return products.findById(id)
@@ -46,9 +49,11 @@ public class ProductService {
         return products.findAll(filter, page);
     }
 
+    @CacheEvict(value = "products", key = "#id")
     @Transactional
     public Product update(UUID id, UpdateProductCommand command) {
-        Product product = get(id);
+        Product product = products.findById(id)
+                .orElseThrow(() -> new NotFoundException("Produto não encontrado"));
         if (command.name() != null) {
             product.rename(command.name());
         }
@@ -75,6 +80,7 @@ public class ProductService {
         return products.save(product);
     }
 
+    @CacheEvict(value = "products", key = "#id")
     @Transactional
     public void delete(UUID id) {
         if (!products.existsById(id)) {
