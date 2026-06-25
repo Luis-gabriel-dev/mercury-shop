@@ -58,6 +58,14 @@ class ProductPersistenceAdapter implements ProductRepository {
     }
 
     @Override
+    public PageResult<Product> search(String text, PageQuery page) {
+        Page<ProductJpaEntity> result = repository.search(text, PageRequest.of(page.page(), page.size()));
+        return new PageResult<>(
+                result.getContent().stream().map(this::toDomain).toList(),
+                result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
+    }
+
+    @Override
     public boolean existsById(UUID id) {
         return repository.existsById(id);
     }

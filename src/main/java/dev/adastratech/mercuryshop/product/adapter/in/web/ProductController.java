@@ -45,14 +45,19 @@ class ProductController {
 
     @GetMapping
     PageResponse<ProductResponse> list(
+            @RequestParam(required = false) String q,
             @RequestParam(required = false) String name,
             @RequestParam(required = false) UUID categoryId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "createdAt") String sort,
             @RequestParam(defaultValue = "ASC") PageQuery.Direction direction) {
-        ProductFilter filter = new ProductFilter(name, categoryId);
         PageQuery query = new PageQuery(page, size, sort, direction);
+        // 'q' = busca full-text (relevância); senão, filtro estruturado por nome/categoria.
+        if (q != null && !q.isBlank()) {
+            return PageResponse.from(service.search(q, query).map(WebMapper::toResponse));
+        }
+        ProductFilter filter = new ProductFilter(name, categoryId);
         return PageResponse.from(service.list(filter, query).map(WebMapper::toResponse));
     }
 

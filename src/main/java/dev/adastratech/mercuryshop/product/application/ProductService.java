@@ -49,6 +49,12 @@ public class ProductService {
         return products.findAll(filter, page);
     }
 
+    /** Busca full-text por texto livre (nome + descrição), ordenada por relevância. */
+    @Transactional(readOnly = true)
+    public PageResult<Product> search(String text, PageQuery page) {
+        return products.search(text, page);
+    }
+
     @CacheEvict(value = "products", key = "#id")
     @Transactional
     public Product update(UUID id, UpdateProductCommand command) {

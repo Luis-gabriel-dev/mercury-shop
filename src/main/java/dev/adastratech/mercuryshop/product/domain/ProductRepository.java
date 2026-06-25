@@ -15,6 +15,9 @@ public interface ProductRepository {
 
     PageResult<Product> findAll(ProductFilter filter, PageQuery page);
 
+    /** Busca full-text (nome + descrição) entre produtos ativos, ordenada por relevância. */
+    PageResult<Product> search(String text, PageQuery page);
+
     boolean existsById(UUID id);
 
     void deleteById(UUID id);
