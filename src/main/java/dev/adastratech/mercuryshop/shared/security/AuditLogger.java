@@ -1,5 +1,6 @@
 package dev.adastratech.mercuryshop.shared.security;
 
+import dev.adastratech.mercuryshop.shared.audit.AuditEventStore;
 import dev.adastratech.mercuryshop.shared.web.RequestIdFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,13 +10,20 @@ import org.springframework.stereotype.Component;
 import java.util.UUID;
 
 /**
- * Log estruturado de eventos de segurança (briefing seção 7.8) com request_id e
- * SEM dados sensíveis — e-mails são mascarados, senhas/tokens nunca aparecem.
+ * Eventos de segurança (briefing seção 7.8) com request_id e SEM dados sensíveis — e-mails são
+ * mascarados, senhas/tokens nunca aparecem. Cada evento é logado (JSON/ECS) e persistido na trilha
+ * de auditoria append-only ({@link AuditEventStore}), para ficar consultável/retenível.
  */
 @Component
 public class AuditLogger {
 
     private static final Logger log = LoggerFactory.getLogger("SECURITY_AUDIT");
+
+    private final AuditEventStore store;
+
+    public AuditLogger(AuditEventStore store) {
+        this.store = store;
+    }
 
     public void registered(UUID userId) {
         emit("USER_REGISTERED", "userId=" + userId);
@@ -78,7 +86,9 @@ public class AuditLogger {
     }
 
     private void emit(String event, String detail) {
-        log.info("event={} {} requestId={}", event, detail, MDC.get(RequestIdFilter.MDC_KEY));
+        String requestId = MDC.get(RequestIdFilter.MDC_KEY);
+        log.info("event={} {} requestId={}", event, detail, requestId);
+        store.append(event, detail, requestId);
     }
 
     private static String mask(String email) {
