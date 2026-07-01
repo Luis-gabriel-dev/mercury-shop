@@ -27,7 +27,8 @@ import java.util.concurrent.TimeUnit;
 public class RateLimitingFilter extends OncePerRequestFilter {
 
     private static final Set<String> LIMITED_PATHS = Set.of(
-            "/v1/auth/login", "/v1/auth/register", "/v1/auth/forgot-password");
+            "/v1/auth/login", "/v1/auth/login/mfa", "/v1/auth/register",
+            "/v1/auth/forgot-password", "/v1/auth/reset-password");
 
     private final LettuceBasedProxyManager<String> proxyManager;
     private final long capacity;
@@ -75,10 +76,10 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     }
 
     private static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
+        // Usa o endereço resolvido pelo servlet. Em produção, o ForwardedHeaderFilter
+        // (server.forward-headers-strategy=framework) já o deriva do X-Forwarded-For — que o Caddy
+        // sobrescreve com o IP real do cliente. NÃO ler o header cru aqui: o valor mais à esquerda é
+        // fornecido pelo cliente e seria forjável, permitindo burlar o rate limit rotacionando-o.
         return request.getRemoteAddr();
     }
 }

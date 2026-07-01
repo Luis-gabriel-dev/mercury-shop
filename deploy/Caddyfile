@@ -14,7 +14,11 @@ mercury-shop.adastratech.dev {
 	}
 
 	# Balanceia entre as réplicas da API (DNS do compose resolve para vários IPs).
-	reverse_proxy api:8080
+	# Sobrescreve o X-Forwarded-For com o IP real do cliente (descarta o que vier forjado),
+	# para o rate limiting da API confiar no endereço resolvido.
+	reverse_proxy api:8080 {
+		header_up X-Forwarded-For {remote_host}
+	}
 }
 
 # --- Teste local: TLS interno autoassinado em https://localhost ---
@@ -23,5 +27,7 @@ localhost {
 	handle /actuator/* {
 		respond 404
 	}
-	reverse_proxy api:8080
+	reverse_proxy api:8080 {
+		header_up X-Forwarded-For {remote_host}
+	}
 }

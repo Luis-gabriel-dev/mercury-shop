@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.time.Duration;
 import java.util.UUID;
@@ -34,7 +35,7 @@ class AuthApiIntegrationTest extends IntegrationTestSupport {
     void registerHidesSecretsAndStartsPending() throws Exception {
         String email = newEmail();
         mockMvc.perform(post("/v1/auth/register")
-                        .header("X-Forwarded-For", UUID.randomUUID().toString())
+                        .with(freshClient())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registerBody(email)))
                 .andExpect(status().isCreated())
@@ -64,13 +65,13 @@ class AuthApiIntegrationTest extends IntegrationTestSupport {
     void loginBeforeVerificationIsForbidden() throws Exception {
         String email = newEmail();
         mockMvc.perform(post("/v1/auth/register")
-                        .header("X-Forwarded-For", UUID.randomUUID().toString())
+                        .with(freshClient())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registerBody(email)))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(post("/v1/auth/login")
-                        .header("X-Forwarded-For", UUID.randomUUID().toString())
+                        .with(freshClient())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(loginBody(email, PASSWORD)))
                 .andExpect(status().isForbidden())
@@ -83,7 +84,7 @@ class AuthApiIntegrationTest extends IntegrationTestSupport {
         registerAndVerify(email);
 
         mockMvc.perform(post("/v1/auth/login")
-                        .header("X-Forwarded-For", UUID.randomUUID().toString())
+                        .with(freshClient())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(loginBody(email, "Wr0ng!Passw0rd")))
                 .andExpect(status().isUnauthorized())
@@ -163,6 +164,26 @@ class AuthApiIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
+    void spoofedXForwardedForCannotBypassRateLimit() throws Exception {
+        // Mesmo cliente (remoteAddr fixo) forjando um "IP novo" via X-Forwarded-For a cada request:
+        // o header é ignorado (o bucket é pelo endereço resolvido), então o limite ainda dispara.
+        MvcResult last = null;
+        for (int i = 0; i < 16; i++) {
+            last = mockMvc.perform(post("/v1/auth/login")
+                            .with(request -> {
+                                request.setRemoteAddr("203.0.113.9");
+                                return request;
+                            })
+                            .header("X-Forwarded-For", UUID.randomUUID().toString())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(loginBody("spoof@example.com", PASSWORD)))
+                    .andReturn();
+        }
+        assertThat(last).isNotNull();
+        assertThat(last.getResponse().getStatus()).isEqualTo(429);
+    }
+
+    @Test
     void changeEmailRequiresConfirmationOnTheNewAddress() throws Exception {
         String email = newEmail();
         registerAndVerify(email);
@@ -210,7 +231,7 @@ class AuthApiIntegrationTest extends IntegrationTestSupport {
 
         // Com o MFA ativo, o login não emite tokens — devolve um desafio.
         MvcResult challenge = mockMvc.perform(post("/v1/auth/login")
-                        .header("X-Forwarded-For", UUID.randomUUID().toString())
+                        .with(freshClient())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(loginBody(email, PASSWORD)))
                 .andExpect(status().isOk())
@@ -236,7 +257,7 @@ class AuthApiIntegrationTest extends IntegrationTestSupport {
         enableMfa(accessToken);
 
         String mfaToken = JsonPath.read(mockMvc.perform(post("/v1/auth/login")
-                        .header("X-Forwarded-For", UUID.randomUUID().toString())
+                        .with(freshClient())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(loginBody(email, PASSWORD)))
                 .andReturn().getResponse().getContentAsString(), "$.mfaToken");
@@ -274,13 +295,22 @@ class AuthApiIntegrationTest extends IntegrationTestSupport {
 
         // E-mail anonimizado: as credenciais antigas não autenticam mais.
         mockMvc.perform(post("/v1/auth/login")
-                        .header("X-Forwarded-For", UUID.randomUUID().toString())
+                        .with(freshClient())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(loginBody(email, PASSWORD)))
                 .andExpect(status().isUnauthorized());
     }
 
     // --- helpers ---
+
+    /** Simula um cliente distinto por requisição (remoteAddr único) — isola os buckets de rate limit. */
+    private static RequestPostProcessor freshClient() {
+        String clientId = UUID.randomUUID().toString();
+        return request -> {
+            request.setRemoteAddr(clientId);
+            return request;
+        };
+    }
 
     /** Faz o setup + ativação do MFA e devolve o segredo TOTP. */
     private String enableMfa(String accessToken) throws Exception {
@@ -298,7 +328,7 @@ class AuthApiIntegrationTest extends IntegrationTestSupport {
 
     private void registerAndVerify(String email) throws Exception {
         mockMvc.perform(post("/v1/auth/register")
-                        .header("X-Forwarded-For", UUID.randomUUID().toString())
+                        .with(freshClient())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registerBody(email)))
                 .andExpect(status().isCreated());
@@ -310,7 +340,7 @@ class AuthApiIntegrationTest extends IntegrationTestSupport {
 
     private MvcResult login(String email, String password) throws Exception {
         return mockMvc.perform(post("/v1/auth/login")
-                        .header("X-Forwarded-For", UUID.randomUUID().toString())
+                        .with(freshClient())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(loginBody(email, password)))
                 .andExpect(status().isOk())
