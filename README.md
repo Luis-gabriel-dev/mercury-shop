@@ -78,6 +78,17 @@ shared/
 - **DTOs sempre** (entidades JPA nunca serializadas); `passwordHash`/`version` nunca saem nas respostas.
 - Auditoria estruturada de eventos de segurança com `request_id` e e-mail mascarado.
 
+### Decisões da Fase 10 (robustez do núcleo)
+- **Outbox à prova de poison message**: um evento impublicável (ex.: classe do tipo ausente) deixava
+  de bloquear a fila — agora a desserialização é isolada e o evento é parqueado como `FAILED` (a claim
+  só pega `PENDING`); falha do broker continua propagando → retry no próximo tick. Um `OutboxPurger`
+  agendado remove os `PUBLISHED` mais antigos que a retenção (default 7d), evitando crescimento infinito.
+- **Resiliência no gateway de pagamento** (Resilience4j): a criação da cobrança (única chamada de rede)
+  passa por **retry** (falhas transitórias) + **circuit breaker** (fail-fast quando o gateway está fora);
+  esgotadas as tentativas ou com o circuito aberto, responde **503** claro em vez de pendurar o request.
+  O `ResilientPaymentGateway` (`@Primary`) embrulha o gateway ativo (stub/Stripe), então vale para ambos;
+  o parse do webhook (HMAC local) não é decorado. Timeouts de rede ficam no próprio cliente do Stripe.
+
 ### Decisões da Fase 9 (ops & CD)
 - **Busca full-text no catálogo** (Postgres FTS): coluna `search_vector` `tsvector` **gerada** de
   `name`+`description` com índice **GIN**; `GET /v1/products?q=` usa `plainto_tsquery` + `ts_rank`
@@ -294,6 +305,7 @@ Fase 4 ✅ Assíncrono (RabbitMQ) + cache · Fase 5 ✅ Produção (observabilid
 Fase 6 ✅ Núcleo (Transactional Outbox, ciclo SHIPPED/DELIVERED, reserva de estoque por expiração, ArchUnit) ·
 Fase 7 ✅ Pagamento real (Stripe — PaymentIntent + webhook idempotente assinado) ·
 Fase 8 ✅ Segurança avançada (MFA/TOTP, detecção de reuso de refresh, troca de e-mail, LGPD, scan no CI) ·
-**Fase 9 ✅ Ops & CD** (busca full-text no catálogo, tracing OpenTelemetry→Tempo, Alertmanager + dashboards de negócio, CD para o GHCR por tag).
+Fase 9 ✅ Ops & CD (busca full-text no catálogo, tracing OpenTelemetry→Tempo, Alertmanager + dashboards de negócio, CD para o GHCR por tag) ·
+**Fase 10 ✅ Robustez** (outbox à prova de poison message + purga; resiliência no gateway de pagamento com Resilience4j).
 
-Roadmap do briefing e a evolução planejada **concluídos**.
+Roadmap do briefing e a evolução planejada **concluídos**; em andamento o endurecimento contínuo (Fases 10–12).

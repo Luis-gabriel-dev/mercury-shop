@@ -16,7 +16,7 @@ import java.util.UUID;
  * {@code stripe} ({@link StripePaymentGateway}). Formato do evento do stub:
  * {@code {"type":"payment_succeeded"|"payment_failed","orderId":"<uuid>"}}.
  */
-@Component
+@Component("paymentGatewayDelegate")
 @ConditionalOnProperty(name = "mercury.payment.provider", havingValue = "stub", matchIfMissing = true)
 class StubPaymentGateway implements PaymentGateway {
 

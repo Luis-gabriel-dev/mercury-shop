@@ -83,6 +83,12 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "Requisição malformada");
     }
 
+    /** Dependência externa indisponível (ex.: gateway de pagamento) → 503, seguro para retry. */
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ResponseEntity<ApiError> handleServiceUnavailable(ServiceUnavailableException ex) {
+        return build(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", ex.getMessage());
+    }
+
     /** Violação de integridade no banco (ex.: unique/FK) → 409 genérico, sem expor o banco. */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiError> handleDataIntegrity(DataIntegrityViolationException ex) {

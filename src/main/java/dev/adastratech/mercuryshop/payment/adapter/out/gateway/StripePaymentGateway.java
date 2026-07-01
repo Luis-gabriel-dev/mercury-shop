@@ -23,16 +23,22 @@ import java.util.UUID;
  * PaymentIntent com o {@code orderId} em metadata e, no webhook, verifica a assinatura via
  * {@link Webhook#constructEvent} antes de normalizar o evento. Segredos só por variável de ambiente.
  */
-@Component
+@Component("paymentGatewayDelegate")
 @ConditionalOnProperty(name = "mercury.payment.provider", havingValue = "stripe")
 class StripePaymentGateway implements PaymentGateway {
 
     private final String webhookSecret;
 
     StripePaymentGateway(@Value("${mercury.payment.stripe.secret-key}") String secretKey,
-                         @Value("${mercury.payment.stripe.webhook-secret}") String webhookSecret) {
+                         @Value("${mercury.payment.stripe.webhook-secret}") String webhookSecret,
+                         @Value("${mercury.payment.stripe.connect-timeout-ms:5000}") int connectTimeoutMs,
+                         @Value("${mercury.payment.stripe.read-timeout-ms:8000}") int readTimeoutMs) {
         Stripe.apiKey = secretKey;
         this.webhookSecret = webhookSecret;
+        // Timeouts de rede no próprio cliente do Stripe; o retry fica a cargo do Resilience4j (Fase 10).
+        Stripe.setConnectTimeout(connectTimeoutMs);
+        Stripe.setReadTimeout(readTimeoutMs);
+        Stripe.setMaxNetworkRetries(0);
     }
 
     @Override

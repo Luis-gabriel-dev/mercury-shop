@@ -23,6 +23,7 @@
         <bucket4j.version>8.14.0</bucket4j.version>
         <archunit.version>1.3.0</archunit.version>
         <stripe.version>29.2.0</stripe.version>
+        <resilience4j.version>2.3.0</resilience4j.version>
     </properties>
 
     <dependencies>
@@ -128,6 +129,14 @@
             <groupId>com.stripe</groupId>
             <artifactId>stripe-java</artifactId>
             <version>${stripe.version}</version>
+        </dependency>
+
+        <!-- Resiliência (Fase 10): circuit breaker + retry no gateway de pagamento (métricas/health
+             integradas ao Actuator). Timeout de rede fica no próprio cliente do Stripe. -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+            <version>${resilience4j.version}</version>
         </dependency>
 
         <!-- Testes -->

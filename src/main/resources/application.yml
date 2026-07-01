@@ -121,6 +121,28 @@ mercury:
     stripe:
       secret-key: ${STRIPE_SECRET_KEY:}
       webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+      # Timeouts de rede do cliente Stripe (ms); o retry fica a cargo do Resilience4j.
+      connect-timeout-ms: ${STRIPE_CONNECT_TIMEOUT_MS:5000}
+      read-timeout-ms: ${STRIPE_READ_TIMEOUT_MS:8000}
+
+# Resiliência no gateway de pagamento (Fase 10): retry para falhas transitórias e circuit breaker
+# para fail-fast quando o gateway está fora. Instância 'paymentGateway' usada pelo ResilientPaymentGateway.
+resilience4j:
+  retry:
+    instances:
+      paymentGateway:
+        max-attempts: 3
+        wait-duration: 300ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+  circuitbreaker:
+    instances:
+      paymentGateway:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+        permitted-number-of-calls-in-half-open-state: 3
 
 ---
 spring:
