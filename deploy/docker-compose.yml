@@ -18,6 +18,24 @@ services:
       - api
     networks: [mercury]
 
+  # Migrations (Fase 11): passo dedicado que roda o Flyway UMA vez contra o Postgres antes das
+  # réplicas subirem. Aplica o schema de forma controlada e desacopla o boot do app (que roda com
+  # flyway.enabled=false e apenas valida). Idempotente: re-deploys aplicam só o que faltar.
+  migrate:
+    image: flyway/flyway:10-alpine
+    command:
+      - -url=jdbc:postgresql://postgres:5432/${POSTGRES_DB:-mercury_shop_db}
+      - -user=${POSTGRES_USER:-mercury}
+      - -password=${POSTGRES_PASSWORD:?defina no .env}
+      - -connectRetries=30
+      - migrate
+    volumes:
+      - ../src/main/resources/db/migration:/flyway/sql:ro   # V1..V9 (default location do Flyway)
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+    networks: [mercury]
+
   api:
     build:
       context: ..
@@ -42,6 +60,7 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }   # schema pronto antes de subir
     deploy:
       replicas: 2          # stateless → escalável (Caddy faz balanceamento via DNS)
     networks: [mercury]
@@ -67,6 +86,7 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }   # schema pronto antes de subir
     networks: [mercury]
 
   postgres:

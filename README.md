@@ -276,11 +276,13 @@ flowchart LR
 - Postgres/Redis/RabbitMQ/Prometheus/Tempo/Alertmanager **só na rede interna**; o Caddy não roteia `/actuator/*`.
 - **Logs estruturados (JSON/ECS)** com `requestId` (+ `traceId`/`spanId`); métricas no Prometheus; **traces** no Tempo;
   dashboards (infra + negócio) provisionados no Grafana; **Alertmanager** despacha os alertas do Prometheus.
+- **Migrations desacopladas do boot**: um serviço `migrate` (Flyway) aplica o schema **uma vez** antes das réplicas
+  subirem (`depends_on: service_completed_successfully`); em prod o app roda com `flyway.enabled=false` e apenas valida.
 
 ```bash
 cd deploy
 cp .env.example .env          # defina senhas e as chaves RSA (JWT_PRIVATE_KEY/JWT_PUBLIC_KEY)
-docker compose up -d --build  # caddy + api×2 + worker + postgres + redis + rabbitmq + prometheus + alertmanager + tempo + grafana
+docker compose up -d --build  # migrate (Flyway) → caddy + api×2 + worker + postgres + redis + rabbitmq + prometheus + alertmanager + tempo + grafana
 ```
 - App via Caddy: `https://localhost` (TLS interno) ou o domínio configurado · Grafana: `http://localhost:3000`.
 

@@ -168,6 +168,11 @@ spring:
   config:
     activate:
       on-profile: prod
+  # Em prod as migrations são aplicadas por um passo dedicado (serviço 'migrate' no compose) ANTES
+  # das réplicas subirem — o app não migra no boot, apenas valida o schema (ddl-auto: validate).
+  # Desacopla o deploy do boot e evita N réplicas disputando a migração. Dev/test seguem migrando.
+  flyway:
+    enabled: false
 
 # Em prod o Swagger/OpenAPI permanece desligado (herda os defaults acima, reforçado aqui).
 springdoc:
