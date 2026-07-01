@@ -294,7 +294,8 @@ docker build -t mercury-shop:latest .   # multi-stage (runtime JRE 21, usuário 
 ```
 
 CI: **GitHub Actions** (`.github/workflows/ci.yml`) roda `mvnw verify` (Testcontainers) e valida o build da imagem em cada push/PR
-(+ scan de dependências em PRs). CD: `release.yml` publica a imagem no **GHCR** ao empurrar uma tag `vX.Y.Z`:
+(+ scan de dependências em PRs). CD: `release.yml` — ao empurrar uma tag `vX.Y.Z` — escaneia a imagem com **Trivy**
+(falha em vulnerabilidade corrigível de severidade alta/crítica), gera o **SBOM** (CycloneDX) e publica no **GHCR**:
 
 ```bash
 git tag v0.9.0 && git push origin v0.9.0   # dispara o build+push da imagem para ghcr.io/<owner>/mercury-shop

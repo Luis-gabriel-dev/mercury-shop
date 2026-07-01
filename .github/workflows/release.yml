@@ -1,7 +1,8 @@
 name: Release
 
-# Publica a imagem no GitHub Container Registry (GHCR) ao empurrar uma tag semver (ex.: v1.2.3),
-# e — quando habilitado — faz deploy na VPS. O CI (ci.yml) continua validando build+testes em cada push.
+# Ao empurrar uma tag semver (ex.: v1.2.3): escaneia a imagem (Trivy) e gera o SBOM (CycloneDX),
+# publica no GitHub Container Registry (GHCR) e — quando habilitado — faz deploy na VPS.
+# O CI (ci.yml) continua validando build+testes em cada push.
 on:
   push:
     tags:
@@ -35,7 +36,46 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
-      - name: Build e push (multi-stage Dockerfile)
+      # Build local (carregado no daemon) para escanear ANTES de publicar — imagem vulnerável não sobe.
+      - name: Build da imagem (load local)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: mercury-shop:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Scan de vulnerabilidades da imagem + base OS (complementa o dependency-review, que só vê deps em PR).
+      - name: Trivy — vulnerabilidades da imagem
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: mercury-shop:scan
+          format: table
+          exit-code: "1"                 # falha em vulnerabilidade corrigível de severidade alta/crítica
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      # SBOM (CycloneDX): inventário dos componentes da imagem, para auditoria/compliance.
+      - name: Trivy — SBOM (CycloneDX)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: mercury-shop:scan
+          scan-type: image
+          format: cyclonedx
+          output: sbom.cdx.json
+
+      - name: Publica o SBOM como artefato
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          if-no-files-found: ignore
+
+      # Só publica depois do scan passar (cache reaproveitado → push quase instantâneo).
+      - name: Push para o GHCR
         uses: docker/build-push-action@v6
         with:
           context: .
