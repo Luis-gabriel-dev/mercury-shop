@@ -1,5 +1,6 @@
 package dev.adastratech.mercuryshop.shared.messaging.outbox;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -18,4 +19,14 @@ public interface OutboxRepository {
 
     /** Marca o evento como publicado (na mesma transação que o reivindicou). */
     void markPublished(UUID id);
+
+    /**
+     * Parqueia um evento impublicável (poison — ex.: tipo/payload que nunca desserializa) como
+     * FAILED. Como a claim só busca PENDING, isso evita que um evento defeituoso bloqueie para
+     * sempre a publicação dos eventos seguintes.
+     */
+    void markFailed(UUID id);
+
+    /** Remove eventos já publicados antes do corte; devolve quantos foram removidos. */
+    int purgePublishedBefore(Instant cutoff);
 }

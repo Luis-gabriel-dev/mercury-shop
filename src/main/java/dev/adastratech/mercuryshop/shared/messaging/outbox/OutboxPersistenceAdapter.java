@@ -2,6 +2,7 @@ package dev.adastratech.mercuryshop.shared.messaging.outbox;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -43,5 +44,20 @@ class OutboxPersistenceAdapter implements OutboxRepository {
             entity.setPublishedAt(Instant.now());
             repository.save(entity);
         });
+    }
+
+    @Override
+    public void markFailed(UUID id) {
+        repository.findById(id).ifPresent(entity -> {
+            entity.setStatus(OutboxStatus.FAILED);
+            entity.setAttempts(entity.getAttempts() + 1);
+            repository.save(entity);
+        });
+    }
+
+    @Override
+    @Transactional
+    public int purgePublishedBefore(Instant cutoff) {
+        return repository.deleteByStatusAndPublishedAtBefore(OutboxStatus.PUBLISHED, cutoff);
     }
 }

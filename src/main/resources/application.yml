@@ -105,6 +105,10 @@ mercury:
   outbox:
     # Intervalo do relay que publica os eventos pendentes do outbox no RabbitMQ.
     poll-delay: 1000
+    # Retenção de eventos já publicados; o purger agendado remove os mais antigos que isto.
+    retention: 7d
+    # Intervalo do purger de eventos publicados antigos (ms).
+    purge-delay: 3600000
   orders:
     # Reserva de estoque: pedido PENDING não pago dentro desta janela é cancelado (estoque devolvido).
     payment-window: 30m

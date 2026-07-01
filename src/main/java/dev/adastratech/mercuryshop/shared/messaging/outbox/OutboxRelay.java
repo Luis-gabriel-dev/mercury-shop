@@ -55,7 +55,21 @@ class OutboxRelay {
             return false;
         }
         OutboxMessage message = claimed.get(0);
-        rabbitTemplate.convertAndSend(RabbitConfig.EXCHANGE, message.routingKey(), deserialize(message));
+        Object event;
+        try {
+            event = deserialize(message);
+        } catch (RuntimeException poison) {
+            // Evento impublicável (ex.: classe do tipo ausente/renomeada): nunca vai desserializar.
+            // Parqueia como FAILED para não bloquear indefinidamente os eventos seguintes — sem isto,
+            // o poison é sempre o pendente mais antigo e trava a fila inteira a cada tick.
+            log.error("Evento do outbox impublicável, parqueado como FAILED: id={} type={}",
+                    message.id(), message.type(), poison);
+            outbox.markFailed(message.id());
+            return true;
+        }
+        // Falha do broker aqui (AmqpException) propaga → a transação reverte, o evento segue PENDING
+        // e é repetido no próximo tick (retry de falha transitória, distinto do poison acima).
+        rabbitTemplate.convertAndSend(RabbitConfig.EXCHANGE, message.routingKey(), event);
         outbox.markPublished(message.id());
         return true;
     }
