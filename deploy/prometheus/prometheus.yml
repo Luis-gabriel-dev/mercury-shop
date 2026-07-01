@@ -1,6 +1,15 @@
 global:
   scrape_interval: 15s
 
+# Regras de alerta (Fase 9) e para onde despachar quando disparam.
+rule_files:
+  - alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   # API (2 réplicas) — DNS do compose retorna múltiplos A records.
   - job_name: mercury-api
@@ -14,3 +23,10 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["worker:8080"]
+
+  # RabbitMQ (plugin rabbitmq_prometheus na porta 15692). O endpoint per-object expõe métricas
+  # por fila (rabbitmq_queue_messages{queue=...}), necessárias aos alertas de DLQ e backlog.
+  - job_name: rabbitmq
+    metrics_path: /metrics/per-object
+    static_configs:
+      - targets: ["rabbitmq:15692"]

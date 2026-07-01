@@ -4,21 +4,24 @@ E-commerce / Order Management API — backend RESTful seguro e escalável.
 A especificação completa (fonte de verdade) fica no documento interno de instruções e
 roadmap do projeto, mantido fora do versionamento (ver `.gitignore`).
 
-> **Status:** todas as 5 fases do roadmap concluídas. Backend de e-commerce com catálogo, usuários/
-> segurança (JWT RSA, RBAC), pedidos transacionais (lock otimista + idempotência), assíncrono via
-> RabbitMQ (pagamento → `OrderPaid` → fatura/e-mail com DLQ) e cache; pronto para produção com
-> **observabilidade** (Prometheus + Grafana), **Caddy (HTTPS+HSTS)**, **worker separado** e **CI**.
-> Arquitetura hexagonal · Postgres + Flyway + Redis + RabbitMQ · **47 testes verdes**.
+> **Status:** roadmap (Fases 1–5) e a evolução (Fases 6–9) **concluídos**. Backend de e-commerce com
+> catálogo (com **busca full-text**), usuários/segurança (JWT RSA, RBAC, MFA/TOTP, LGPD), pedidos
+> transacionais (lock otimista + idempotência + **outbox**), pagamento real (**Stripe** + webhook),
+> assíncrono via RabbitMQ (`OrderPaid` → fatura/e-mail com DLQ) e cache; pronto para produção com
+> **observabilidade** (Prometheus + Grafana + **tracing OpenTelemetry/Tempo** + **Alertmanager**),
+> **Caddy (HTTPS+HSTS)**, **worker separado** e **CI/CD** (imagem publicada no GHCR por tag).
+> Arquitetura hexagonal · Postgres + Flyway + Redis + RabbitMQ · **70 testes verdes**.
 
 ---
 
 ## Stack
 
-Java 21 · Spring Boot 3.4 · Maven · Spring Web/Validation/Data JPA · PostgreSQL · Flyway ·
+Java 21 · Spring Boot 3.4 · Maven · Spring Web/Validation/Data JPA · PostgreSQL (+ **full-text search**) · Flyway ·
 **Spring Security + OAuth2 Resource Server (JWT RSA)** · **Redis** (refresh tokens, lockout, rate limiting, cache) ·
 **Bucket4j** (rate limiting) · **RabbitMQ / Spring AMQP** (eventos assíncronos, DLQ) · **Stripe** (pagamento, com gateway stub em dev/test) ·
-**Micrometer + Prometheus + Grafana** · **Caddy** (HTTPS) · springdoc-openapi (dev) · Actuator ·
-JUnit 5 + Testcontainers · GitHub Actions (CI).
+**Micrometer + Prometheus + Grafana** · **Micrometer Tracing → OpenTelemetry (OTLP) → Tempo** · **Alertmanager** ·
+**Caddy** (HTTPS) · springdoc-openapi (dev) · Actuator ·
+JUnit 5 + Testcontainers · GitHub Actions (**CI** + **CD** para o GHCR).
 
 ## Arquitetura — Hexagonal (Ports & Adapters)
 
@@ -74,6 +77,26 @@ shared/
 - Headers de segurança (CSP, X-Frame-Options DENY, nosniff, Referrer-Policy, HSTS), **CORS** com allowlist.
 - **DTOs sempre** (entidades JPA nunca serializadas); `passwordHash`/`version` nunca saem nas respostas.
 - Auditoria estruturada de eventos de segurança com `request_id` e e-mail mascarado.
+
+### Decisões da Fase 9 (ops & CD)
+- **Busca full-text no catálogo** (Postgres FTS): coluna `search_vector` `tsvector` **gerada** de
+  `name`+`description` com índice **GIN**; `GET /v1/products?q=` usa `plainto_tsquery` + `ts_rank`
+  (só produtos ativos). Sem `q`, cai no filtro estruturado (`name`/`categoryId`).
+- **Tracing distribuído** (Micrometer Tracing → OpenTelemetry, export **OTLP** para o **Tempo**): o
+  contexto de trace é propagado nos **headers da mensagem RabbitMQ** (observação ligada no template e
+  no listener), correlacionando **api(relay do outbox) → worker**; `traceId`/`spanId` entram no MDC e
+  aparecem nos **logs ECS** (correlação log↔trace). O export fica **desligado em dev/test** (sem backend)
+  e ligado no perfil prod — a propagação de contexto funciona independentemente. Como o outbox é o ponto
+  de desacoplamento assíncrono, o trace do request HTTP e o trace da publicação são spans distintos por design.
+- **Alertas** (Prometheus + **Alertmanager**): regras para **erro 5xx > 5%**, **p99 > 1.5s**,
+  **DLQ não vazia** e **backlog de fila** (via plugin `rabbitmq_prometheus`, métricas por fila) e **alvo fora do ar**.
+  O receiver padrão não tem integração externa (nenhum segredo no repo); Slack/e-mail entram por segredo montado.
+- **Dashboards de negócio** no Grafana: **GMV** (novo contador `mercury.orders.gmv`), **ticket médio**,
+  **conversão** (pagos/criados), pedidos e pagamentos por minuto, perdas (cancelados/expirados).
+- **CD** (`.github/workflows/release.yml`): ao empurrar uma **tag `vX.Y.Z`**, publica a imagem no
+  **GHCR** (`ghcr.io/<owner>/mercury-shop`, tags semver + `latest`) via `docker/build-push-action`. O job
+  de **deploy por SSH** (`docker compose pull && up -d`) fica desligado por padrão (variável `DEPLOY_ENABLED`)
+  até existirem os segredos do servidor — assim o publish já funciona e o deploy é ativado quando a infra estiver pronta.
 
 ### Decisões da Fase 8 (segurança avançada)
 - **MFA/TOTP** (RFC 6238) implementado no domínio (sem dependência). Com MFA ativo, o login vira duas
@@ -138,6 +161,7 @@ shared/
 
 ### Catálogo (`/v1`)
 Leitura (`GET /v1/products`, `/v1/categories`) **pública**; escrita (`POST/PATCH/DELETE`) exige **ADMIN**.
+`GET /v1/products?q=<termo>` faz **busca full-text** (Postgres FTS, ranqueada); sem `q`, filtra por `name`/`categoryId`.
 
 ### Carrinho (`/v1/cart`, autenticado)
 | Método | Rota | Descrição |
@@ -226,19 +250,26 @@ flowchart LR
     prom[Prometheus] -->|scrape /actuator/prometheus| api1
     prom --> api2
     prom --> worker
+    prom -->|scrape 15692| mq
+    prom -->|alertas| am[Alertmanager]
+    api1 -->|OTLP| tempo[(Tempo)]
+    api2 -->|OTLP| tempo
+    worker -->|OTLP| tempo
     grafana[Grafana] --> prom
+    grafana --> tempo
   end
 ```
 
 - **API stateless replicada** (consumidores desligados) atrás do **Caddy** (HTTPS automático, HSTS, balanceamento).
 - **Worker separado** (`MERCURY_MESSAGING_CONSUMERS_ENABLED=true`) consome as filas; a API só publica.
-- Postgres/Redis/RabbitMQ/Prometheus **só na rede interna**; o Caddy não roteia `/actuator/*`.
-- **Logs estruturados (JSON/ECS)** com `requestId`; métricas no Prometheus; dashboard provisionado no Grafana.
+- Postgres/Redis/RabbitMQ/Prometheus/Tempo/Alertmanager **só na rede interna**; o Caddy não roteia `/actuator/*`.
+- **Logs estruturados (JSON/ECS)** com `requestId` (+ `traceId`/`spanId`); métricas no Prometheus; **traces** no Tempo;
+  dashboards (infra + negócio) provisionados no Grafana; **Alertmanager** despacha os alertas do Prometheus.
 
 ```bash
 cd deploy
 cp .env.example .env          # defina senhas e as chaves RSA (JWT_PRIVATE_KEY/JWT_PUBLIC_KEY)
-docker compose up -d --build  # caddy + api×2 + worker + postgres + redis + rabbitmq + prometheus + grafana
+docker compose up -d --build  # caddy + api×2 + worker + postgres + redis + rabbitmq + prometheus + alertmanager + tempo + grafana
 ```
 - App via Caddy: `https://localhost` (TLS interno) ou o domínio configurado · Grafana: `http://localhost:3000`.
 
@@ -249,7 +280,12 @@ docker compose up -d --build  # caddy + api×2 + worker + postgres + redis + rab
 docker build -t mercury-shop:latest .   # multi-stage (runtime JRE 21, usuário não-root)
 ```
 
-CI: **GitHub Actions** (`.github/workflows/ci.yml`) roda `mvnw verify` (Testcontainers) e valida o build da imagem em cada push/PR.
+CI: **GitHub Actions** (`.github/workflows/ci.yml`) roda `mvnw verify` (Testcontainers) e valida o build da imagem em cada push/PR
+(+ scan de dependências em PRs). CD: `release.yml` publica a imagem no **GHCR** ao empurrar uma tag `vX.Y.Z`:
+
+```bash
+git tag v0.9.0 && git push origin v0.9.0   # dispara o build+push da imagem para ghcr.io/<owner>/mercury-shop
+```
 
 ## Roadmap
 
@@ -257,7 +293,7 @@ Fase 1 ✅ Fundação · Fase 2 ✅ Usuários + Segurança · Fase 3 ✅ Pedidos
 Fase 4 ✅ Assíncrono (RabbitMQ) + cache · Fase 5 ✅ Produção (observabilidade, Caddy/HTTPS, compose completo, CI) ·
 Fase 6 ✅ Núcleo (Transactional Outbox, ciclo SHIPPED/DELIVERED, reserva de estoque por expiração, ArchUnit) ·
 Fase 7 ✅ Pagamento real (Stripe — PaymentIntent + webhook idempotente assinado) ·
-**Fase 8 ✅ Segurança avançada** (MFA/TOTP, detecção de reuso de refresh, troca de e-mail, LGPD, scan no CI).
+Fase 8 ✅ Segurança avançada (MFA/TOTP, detecção de reuso de refresh, troca de e-mail, LGPD, scan no CI) ·
+**Fase 9 ✅ Ops & CD** (busca full-text no catálogo, tracing OpenTelemetry→Tempo, Alertmanager + dashboards de negócio, CD para o GHCR por tag).
 
-Evolução planejada (ver plano interno): Fase 9 — ops & CD (OpenTelemetry, Alertmanager, push de imagem + deploy,
-busca full-text, dashboards de negócio).
+Roadmap do briefing e a evolução planejada **concluídos**.

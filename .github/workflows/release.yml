@@ -1,0 +1,66 @@
+name: Release
+
+# Publica a imagem no GitHub Container Registry (GHCR) ao empurrar uma tag semver (ex.: v1.2.3),
+# e — quando habilitado — faz deploy na VPS. O CI (ci.yml) continua validando build+testes em cada push.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # necessário para push no GHCR
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login no GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}   # token efêmero do próprio runner
+
+      # Deriva tags/labels da imagem a partir da tag git (semver + latest).
+      - name: Metadados da imagem
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/mercury-shop
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build e push (multi-stage Dockerfile)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Deploy na VPS: puxa a nova imagem e recria os serviços via compose. Fica DESLIGADO por padrão
+  # (variável de repositório DEPLOY_ENABLED != 'true') até que os segredos do servidor existam —
+  # assim o publish acima funciona de imediato e o deploy é ativado quando a infra estiver pronta.
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    environment: production
+    steps:
+      - name: Deploy por SSH (docker compose pull && up -d)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd ${{ secrets.DEPLOY_PATH }}
+            docker compose pull
+            docker compose up -d --remove-orphans

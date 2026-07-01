@@ -27,10 +27,15 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:mercury}
     password: ${RABBITMQ_PASSWORD:mercury}
+    template:
+      # Propaga o contexto de trace (traceparent) nos headers da mensagem ao publicar (Fase 9).
+      observation-enabled: true
     listener:
       simple:
         # Ao esgotar as tentativas, rejeita sem requeue → vai para a DLQ via x-dead-letter-exchange.
         default-requeue-rejected: false
+        # Continua o trace do publicador ao consumir → correlaciona api(relay)→worker.
+        observation-enabled: true
         retry:
           enabled: true
           max-attempts: 3
@@ -58,6 +63,14 @@ management:
     distribution:
       percentiles-histogram:
         "[http.server.requests]": true
+  # Tracing distribuído (Fase 9): amostra tudo (demo) e injeta traceId/spanId no MDC dos logs.
+  # O envio de spans fica DESLIGADO por padrão (sem backend em dev/test); o perfil prod liga e
+  # aponta o OTLP para o Tempo. A propagação de contexto (api→worker) funciona independentemente.
+  tracing:
+    sampling:
+      probability: 1.0
+    export:
+      enabled: false
 
 # OpenAPI/Swagger desligado por padrão; o perfil dev liga (briefing seção 7.4).
 springdoc:
@@ -137,11 +150,21 @@ springdoc:
   swagger-ui:
     enabled: false
 
-# Logs estruturados em JSON (formato ECS) — recurso nativo do Spring Boot 3.4; inclui o requestId do MDC.
+# Logs estruturados em JSON (formato ECS) — recurso nativo do Spring Boot 3.4; inclui o requestId
+# e, com o tracing ligado, também traceId/spanId (correlação log↔trace).
 logging:
   structured:
     format:
       console: ecs
+
+# Em prod os spans são exportados via OTLP para o Tempo (rede interna do compose).
+management:
+  tracing:
+    export:
+      enabled: true
+  otlp:
+    tracing:
+      endpoint: ${OTLP_TRACING_ENDPOINT:http://tempo:4318/v1/traces}
 
 # Atrás do Caddy (TLS terminado no proxy): respeita X-Forwarded-* para esquema/Secure corretos.
 server:

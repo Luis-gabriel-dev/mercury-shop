@@ -8,3 +8,11 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
     editable: false
+
+  # Tempo (Fase 9): backend de traces alimentado via OTLP pela api e pelo worker.
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false

@@ -1,0 +1,59 @@
+# Regras de alerta do Mercury Shop (Fase 9). Prometheus avalia; Alertmanager despacha.
+groups:
+  - name: mercury-http
+    rules:
+      - alert: HighHttpErrorRate
+        # Proporção de respostas 5xx acima de 5% por 5 min.
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Taxa de erro 5xx alta (> 5%)"
+          description: "A API está respondendo mais de 5% de erros de servidor nos últimos 5 minutos."
+
+      - alert: HighLatencyP99
+        # p99 da latência HTTP acima de 1.5s por 10 min.
+        expr: histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[5m])) by (le)) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Latência p99 alta (> 1.5s)"
+          description: "O percentil 99 da latência HTTP passou de 1.5s por 10 minutos."
+
+  - name: mercury-messaging
+    rules:
+      - alert: DeadLetterQueueNotEmpty
+        # Qualquer mensagem parada numa DLQ indica processamento falhando repetidamente.
+        expr: sum by (queue) (rabbitmq_queue_messages{queue=~".+\\.dlq"}) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Mensagens na DLQ {{ $labels.queue }}"
+          description: "Há {{ $value }} mensagem(ns) mortas em {{ $labels.queue }} há mais de 5 minutos."
+
+      - alert: QueueBacklog
+        # Backlog crescente numa fila de trabalho (consumidores não dando conta).
+        expr: sum by (queue) (rabbitmq_queue_messages{queue!~".+\\.dlq"}) > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backlog na fila {{ $labels.queue }}"
+          description: "A fila {{ $labels.queue }} acumula {{ $value }} mensagens há mais de 10 minutos."
+
+  - name: mercury-targets
+    rules:
+      - alert: TargetDown
+        # Algum alvo de scrape (api/worker/rabbitmq) inacessível.
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Alvo {{ $labels.job }} fora do ar"
+          description: "O Prometheus não consegue coletar métricas de {{ $labels.instance }} ({{ $labels.job }}) há 2 minutos."

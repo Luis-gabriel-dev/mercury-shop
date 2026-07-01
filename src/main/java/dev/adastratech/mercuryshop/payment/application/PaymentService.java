@@ -33,6 +33,7 @@ public class PaymentService {
     private final DomainEventPublisher events;
     private final String currency;
     private final Counter paymentsApproved;
+    private final Counter gmv;
 
     public PaymentService(OrderRepository orders, PaymentRepository payments, PaymentGateway gateway,
                           DomainEventPublisher events,
@@ -45,6 +46,9 @@ public class PaymentService {
         this.currency = currency;
         this.paymentsApproved = Counter.builder("mercury.payments.approved")
                 .description("Pagamentos aprovados").register(meterRegistry);
+        this.gmv = Counter.builder("mercury.orders.gmv")
+                .description("Valor bruto transacionado (GMV) de pedidos pagos")
+                .baseUnit(currency).register(meterRegistry);
     }
 
     /** Inicia o pagamento de um pedido PENDING: cria a cobrança no gateway e devolve o client secret. */
@@ -92,6 +96,7 @@ public class PaymentService {
             events.publishOrderPaid(new OrderPaidEvent(
                     order.getId(), order.getUserId(), order.getTotal(), Instant.now()));
             paymentsApproved.increment();
+            gmv.increment(order.getTotal().doubleValue());
         } else { // FAILED
             payments.findByOrderId(order.getId()).ifPresent(payment -> {
                 payment.markDeclined();
