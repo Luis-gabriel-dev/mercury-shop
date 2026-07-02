@@ -24,7 +24,21 @@
         <archunit.version>1.3.0</archunit.version>
         <stripe.version>29.2.0</stripe.version>
         <resilience4j.version>2.3.0</resilience4j.version>
+        <spring-modulith.version>1.3.1</spring-modulith.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Spring Modulith (Fase 11): BOM alinhado ao Spring Boot 3.4. -->
+            <dependency>
+                <groupId>org.springframework.modulith</groupId>
+                <artifactId>spring-modulith-bom</artifactId>
+                <version>${spring-modulith.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- Web + validação -->
@@ -180,6 +194,22 @@
             <groupId>com.tngtech.archunit</groupId>
             <artifactId>archunit-junit5</artifactId>
             <version>${archunit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Spring Modulith (Fase 11): API de anotações (@ApplicationModule/@NamedInterface) usada nos
+             package-info; só metadados, sem comportamento em runtime. Verificação e docs ficam em test. -->
+        <dependency>
+            <groupId>org.springframework.modulith</groupId>
+            <artifactId>spring-modulith-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.modulith</groupId>
+            <artifactId>spring-modulith-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.modulith</groupId>
+            <artifactId>spring-modulith-docs</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

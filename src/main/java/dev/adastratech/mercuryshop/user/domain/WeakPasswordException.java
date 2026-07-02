@@ -1,10 +1,16 @@
 package dev.adastratech.mercuryshop.user.domain;
 
-/** Senha não atende à política de segurança. Mapeada para 422. */
-public class WeakPasswordException extends RuntimeException {
+import dev.adastratech.mercuryshop.shared.exception.UnprocessableEntityException;
+
+/**
+ * Senha não atende à política de segurança. Estende a exceção compartilhada de entidade não
+ * processável (código {@code WEAK_PASSWORD}) → 422, tratada pelo handler genérico — assim o
+ * {@code shared} não precisa conhecer este tipo do domínio de usuário.
+ */
+public class WeakPasswordException extends UnprocessableEntityException {
 
     public WeakPasswordException() {
-        super("A senha não atende à política de segurança (mínimo 12 caracteres, "
+        super("WEAK_PASSWORD", "A senha não atende à política de segurança (mínimo 12 caracteres, "
                 + "com maiúscula, minúscula, dígito e símbolo)");
     }
 }

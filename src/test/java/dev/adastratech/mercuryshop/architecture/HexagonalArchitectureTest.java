@@ -5,6 +5,8 @@ import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
 import com.tngtech.archunit.lang.ArchRule;
 
+import static com.tngtech.archunit.base.DescribedPredicate.not;
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 /**
@@ -22,11 +24,14 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
         importOptions = ImportOption.DoNotIncludeTests.class)
 class HexagonalArchitectureTest {
 
+    // O domínio pode carregar as anotações estruturais do Spring Modulith (@NamedInterface etc.) nos
+    // package-info — são metadados de fronteira em tempo de build, não acoplamento ao Spring de runtime.
     @ArchTest
     static final ArchRule dominio_nao_depende_de_spring =
             noClasses().that().resideInAPackage("..domain..")
-                    .should().dependOnClassesThat().resideInAnyPackage("org.springframework..")
-                    .as("o domínio não deve depender de Spring");
+                    .should().dependOnClassesThat(resideInAPackage("org.springframework..")
+                            .and(not(resideInAPackage("org.springframework.modulith.."))))
+                    .as("o domínio não deve depender de Spring (exceto anotações do Spring Modulith)");
 
     @ArchTest
     static final ArchRule dominio_nao_depende_de_jpa =

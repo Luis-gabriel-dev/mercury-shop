@@ -78,6 +78,20 @@ shared/
 - **DTOs sempre** (entidades JPA nunca serializadas); `passwordHash`/`version` nunca saem nas respostas.
 - Auditoria estruturada de eventos de segurança com `request_id` e e-mail mascarado.
 
+### Decisões da Fase 11 (hardening de segurança, ops e arquitetura)
+- **Rate limiting à prova de spoofing**: passou a usar `request.getRemoteAddr()` (resolvido pelo proxy) em
+  vez do `X-Forwarded-For` cru (forjável); o Caddy sobrescreve o header com o IP real. Estendido a `/login/mfa`
+  e `/reset-password`.
+- **Trilha de auditoria persistida** (append-only, `shared/audit` + V9): eventos de segurança ficam
+  consultáveis/reteníveis, sem PII.
+- **Migrations desacopladas do boot**: serviço `migrate` (Flyway) aplica o schema antes das réplicas; o app em prod só valida.
+- **Scan de imagem no CD**: Trivy (falha em vulnerabilidade alta/crítica) + SBOM (CycloneDX) antes de publicar no GHCR.
+- **Spring Modulith**: verifica as fronteiras dos módulos em runtime (features só acessam a API — base +
+  *named interfaces* `domain` — umas das outras; `shared` é um kernel OPEN, leaf) e **gera diagramas/canvas**
+  dos módulos. A verificação revelou e corrigiu acoplamentos reais: `WeakPasswordException` passou a estender a
+  exceção compartilhada (removeu `shared → user`); o `DevAdminSeeder` e o `OrderPaidNotificationWorker` foram
+  para o módulo `user` (removeu `shared → user` e o ciclo `order ↔ user`).
+
 ### Decisões da Fase 10 (robustez do núcleo)
 - **Outbox à prova de poison message**: um evento impublicável (ex.: classe do tipo ausente) deixava
   de bloquear a fila — agora a desserialização é isolada e o evento é parqueado como `FAILED` (a claim
@@ -309,6 +323,7 @@ Fase 6 ✅ Núcleo (Transactional Outbox, ciclo SHIPPED/DELIVERED, reserva de es
 Fase 7 ✅ Pagamento real (Stripe — PaymentIntent + webhook idempotente assinado) ·
 Fase 8 ✅ Segurança avançada (MFA/TOTP, detecção de reuso de refresh, troca de e-mail, LGPD, scan no CI) ·
 Fase 9 ✅ Ops & CD (busca full-text no catálogo, tracing OpenTelemetry→Tempo, Alertmanager + dashboards de negócio, CD para o GHCR por tag) ·
-**Fase 10 ✅ Robustez** (outbox à prova de poison message + purga; resiliência no gateway de pagamento com Resilience4j).
+Fase 10 ✅ Robustez (outbox à prova de poison message + purga; resiliência no gateway de pagamento com Resilience4j) ·
+**Fase 11 ✅ Hardening** (rate-limit à prova de spoofing, auditoria persistida, migrations fora do boot, Trivy/SBOM no CD, Spring Modulith).
 
-Roadmap do briefing e a evolução planejada **concluídos**; em andamento o endurecimento contínuo (Fases 10–12).
+Roadmap do briefing e a evolução planejada **concluídos**; endurecimento contínuo (Fase 12: polimento — em aberto).

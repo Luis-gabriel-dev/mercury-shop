@@ -1,4 +1,4 @@
-package dev.adastratech.mercuryshop.shared.dev;
+package dev.adastratech.mercuryshop.user.adapter.in.dev;
 
 import dev.adastratech.mercuryshop.user.domain.PasswordHasher;
 import dev.adastratech.mercuryshop.user.domain.Role;
@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 /**
  * APENAS DEV: garante um usuário ADMIN já ativo/verificado para facilitar o teste manual
  * (cria se não existir; promove se existir). Nunca roda em produção (@Profile("dev")).
+ * Fica no módulo {@code user} (seed de usuário) — não no {@code shared}, que deve ser um leaf.
  */
 @Component
 @Profile("dev")

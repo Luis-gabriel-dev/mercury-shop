@@ -1,4 +1,4 @@
-package dev.adastratech.mercuryshop.order.adapter.in.messaging;
+package dev.adastratech.mercuryshop.user.adapter.in.messaging;
 
 import dev.adastratech.mercuryshop.shared.messaging.EmailMessage;
 import dev.adastratech.mercuryshop.shared.messaging.OrderPaidEvent;
@@ -9,7 +9,11 @@ import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-/** Worker que, ao receber OrderPaid, publica o e-mail de confirmação do pedido. */
+/**
+ * Ao receber OrderPaid, resolve o usuário do pedido e publica o e-mail de confirmação. Vive no módulo
+ * {@code user} (notificação ao usuário, ao lado do EmailWorker) — recebe o evento via {@code shared}
+ * e não depende de {@code order}, evitando o ciclo order↔user.
+ */
 @Component
 @ConditionalOnProperty(name = "mercury.messaging.consumers.enabled", matchIfMissing = true)
 class OrderPaidNotificationWorker {
