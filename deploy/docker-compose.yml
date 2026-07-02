@@ -56,6 +56,13 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://mercury-shop.adastratech.dev}
     expose:
       - "8080"
+    healthcheck:
+      # Caddy só roteia para réplicas saudáveis; o healthcheck evita mandar tráfego durante o boot.
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8080/actuator/health | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -63,6 +70,15 @@ services:
       migrate: { condition: service_completed_successfully }   # schema pronto antes de subir
     deploy:
       replicas: 2          # stateless → escalável (Caddy faz balanceamento via DNS)
+      # Rolling sem downtime (aplicado pelo Swarm; com `compose up` recrie uma réplica por vez):
+      # sobe a nova réplica e só então derruba a antiga.
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 10s
+      rollback_config:
+        order: start-first
+        parallelism: 1
     networks: [mercury]
 
   worker:
@@ -82,6 +98,12 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?defina no .env}
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?defina no .env}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?defina no .env}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8080/actuator/health | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

@@ -71,6 +71,10 @@ management:
       probability: 1.0
     export:
       enabled: false
+    # Formato de propagação do contexto entre serviços (api→worker via headers da fila): W3C
+    # (traceparent) — o padrão interoperável de tracing distribuído.
+    propagation:
+      type: W3C
 
 # OpenAPI/Swagger desligado por padrão; o perfil dev liga (briefing seção 7.4).
 springdoc:

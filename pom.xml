@@ -25,6 +25,8 @@
         <stripe.version>29.2.0</stripe.version>
         <resilience4j.version>2.3.0</resilience4j.version>
         <spring-modulith.version>1.3.1</spring-modulith.version>
+        <pitest.version>1.17.0</pitest.version>
+        <pitest-junit5.version>1.2.1</pitest-junit5.version>
     </properties>
 
     <dependencyManagement>
@@ -219,6 +221,34 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!-- Mutation testing (Fase 12): mede a QUALIDADE dos testes (não só a cobertura) mutando
+                 as regras de domínio e verificando se os testes pegam. Roda sob demanda (não no build
+                 normal): ./mvnw test-compile org.pitest:pitest-maven:mutationCoverage -->
+            <plugin>
+                <groupId>org.pitest</groupId>
+                <artifactId>pitest-maven</artifactId>
+                <version>${pitest.version}</version>
+                <configuration>
+                    <targetClasses>
+                        <param>dev.adastratech.mercuryshop.*.domain.*</param>
+                    </targetClasses>
+                    <targetTests>
+                        <param>dev.adastratech.mercuryshop.*.domain.*</param>
+                    </targetTests>
+                    <outputFormats>
+                        <param>HTML</param>
+                    </outputFormats>
+                    <timestampedReports>false</timestampedReports>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-junit5-plugin</artifactId>
+                        <version>${pitest-junit5.version}</version>
+                    </dependency>
+                </dependencies>
             </plugin>
         </plugins>
     </build>

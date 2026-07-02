@@ -4,13 +4,13 @@ E-commerce / Order Management API — backend RESTful seguro e escalável.
 A especificação completa (fonte de verdade) fica no documento interno de instruções e
 roadmap do projeto, mantido fora do versionamento (ver `.gitignore`).
 
-> **Status:** roadmap (Fases 1–5) e a evolução (Fases 6–9) **concluídos**. Backend de e-commerce com
+> **Status:** roadmap (Fases 1–5) e toda a evolução (Fases 6–12) **concluídos**. Backend de e-commerce com
 > catálogo (com **busca full-text**), usuários/segurança (JWT RSA, RBAC, MFA/TOTP, LGPD), pedidos
 > transacionais (lock otimista + idempotência + **outbox**), pagamento real (**Stripe** + webhook),
 > assíncrono via RabbitMQ (`OrderPaid` → fatura/e-mail com DLQ) e cache; pronto para produção com
 > **observabilidade** (Prometheus + Grafana + **tracing OpenTelemetry/Tempo** + **Alertmanager**),
 > **Caddy (HTTPS+HSTS)**, **worker separado** e **CI/CD** (imagem publicada no GHCR por tag).
-> Arquitetura hexagonal · Postgres + Flyway + Redis + RabbitMQ · **70 testes verdes**.
+> Arquitetura hexagonal (verificada com **Spring Modulith** + ArchUnit) · Postgres + Flyway + Redis + RabbitMQ · **81 testes verdes**.
 
 ---
 
@@ -77,6 +77,15 @@ shared/
 - Headers de segurança (CSP, X-Frame-Options DENY, nosniff, Referrer-Policy, HSTS), **CORS** com allowlist.
 - **DTOs sempre** (entidades JPA nunca serializadas); `passwordHash`/`version` nunca saem nas respostas.
 - Auditoria estruturada de eventos de segurança com `request_id` e e-mail mascarado.
+
+### Decisões da Fase 12 (polimento)
+- **Moedas zero-decimais**: `MinorUnits.of(amount, currency)` converte para a menor unidade pelas casas
+  reais da moeda (`java.util.Currency`) — JPY (0), BRL/USD (2), BHD (3) — em vez de assumir sempre 2 (que
+  cobraria 100× a mais em ienes).
+- **Deploy sem downtime**: `healthcheck` na API + **health checks ativos/passivos no Caddy** (só roteia
+  para réplicas saudáveis) + `update_config: start-first` — recriar uma réplica por vez mantém o serviço no ar.
+- **Qualidade dos testes**: **mutation testing (PIT)** sob demanda no domínio (*test strength* ~89% nos
+  mutantes cobertos) e propagação de trace explícita em **W3C**.
 
 ### Decisões da Fase 11 (hardening de segurança, ops e arquitetura)
 - **Rate limiting à prova de spoofing**: passou a usar `request.getRemoteAddr()` (resolvido pelo proxy) em
@@ -324,6 +333,7 @@ Fase 7 ✅ Pagamento real (Stripe — PaymentIntent + webhook idempotente assina
 Fase 8 ✅ Segurança avançada (MFA/TOTP, detecção de reuso de refresh, troca de e-mail, LGPD, scan no CI) ·
 Fase 9 ✅ Ops & CD (busca full-text no catálogo, tracing OpenTelemetry→Tempo, Alertmanager + dashboards de negócio, CD para o GHCR por tag) ·
 Fase 10 ✅ Robustez (outbox à prova de poison message + purga; resiliência no gateway de pagamento com Resilience4j) ·
-**Fase 11 ✅ Hardening** (rate-limit à prova de spoofing, auditoria persistida, migrations fora do boot, Trivy/SBOM no CD, Spring Modulith).
+Fase 11 ✅ Hardening (rate-limit à prova de spoofing, auditoria persistida, migrations fora do boot, Trivy/SBOM no CD, Spring Modulith) ·
+**Fase 12 ✅ Polimento** (moedas zero-decimais, deploy sem downtime, mutation testing com PIT).
 
-Roadmap do briefing e a evolução planejada **concluídos**; endurecimento contínuo (Fase 12: polimento — em aberto).
+Roadmap do briefing e toda a evolução planejada (Fases 6–12) **concluídos**.

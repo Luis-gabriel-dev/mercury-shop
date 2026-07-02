@@ -18,6 +18,13 @@ mercury-shop.adastratech.dev {
 	# para o rate limiting da API confiar no endereço resolvido.
 	reverse_proxy api:8080 {
 		header_up X-Forwarded-For {remote_host}
+		lb_policy least_conn
+		# Health checks ativos + passivos: só encaminha para réplicas saudáveis, então recriar uma
+		# réplica por vez (rolling) mantém o serviço no ar — deploy sem downtime.
+		health_uri /actuator/health
+		health_interval 10s
+		health_timeout 3s
+		fail_duration 15s
 	}
 }
 
