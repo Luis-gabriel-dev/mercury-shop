@@ -7,6 +7,7 @@ import com.stripe.model.Event;
 import com.stripe.model.StripeObject;
 import com.stripe.net.Webhook;
 import com.stripe.param.PaymentIntentCreateParams;
+import dev.adastratech.mercuryshop.payment.domain.MinorUnits;
 import dev.adastratech.mercuryshop.payment.domain.PaymentGateway;
 import dev.adastratech.mercuryshop.shared.exception.BadRequestException;
 import org.springframework.beans.factory.annotation.Value;
@@ -44,7 +45,7 @@ class StripePaymentGateway implements PaymentGateway {
     @Override
     public PaymentIntent createIntent(UUID orderId, BigDecimal amount, String currency) {
         PaymentIntentCreateParams params = PaymentIntentCreateParams.builder()
-                .setAmount(amount.movePointRight(2).longValueExact()) // menor unidade da moeda (centavos)
+                .setAmount(MinorUnits.of(amount, currency)) // menor unidade conforme as casas da moeda
                 .setCurrency(currency)
                 .putMetadata("orderId", orderId.toString())
                 .build();
